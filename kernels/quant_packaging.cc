@@ -12,7 +12,8 @@ using torch::autograd::Function;
 Tensor pack_nonlinear_cuda(Tensor data, Tensor qmap);
 
 // Unpack
-// Tensor unpack_nonlinear_cuda
+Tensor unpack_nonlinear_cuda(Tensor data, Tensor qmap, int64_t num_groups, int64_t group_size);
+
 
 Tensor pack_nonlinear(Tensor data, Tensor qmap) {
     CHECK_CUDA_TENSOR_DIM_FLOAT(data,2)
@@ -21,7 +22,15 @@ Tensor pack_nonlinear(Tensor data, Tensor qmap) {
     return pack_nonlinear_cuda(data, qmap)
 }
 
-PYBIND11_MODULE(TORCH_EXTENSION_NAME, m) {
-    m.def("pack_nonlinear", & pack_nonlinear):
-}
+Tensor unpack_nonlinear(Tensor data, Tensor qmap, int64_t num_groups,
+                        int64_t group_size) {
+                        CHECK_CUDA_TENSOR_DIM_TYPE(data, 1, torch::kInt8);
+                        CHECK_CUDA_TENSOR_DIM_FLOAT(qmap, 1);
 
+                        return unpack_nonlinear_cuda(data, qmap, num_groups, group_size);
+                        }
+
+PYBIND11_MODULE(TORCH_EXTENSION_NAME, m) {
+    m.def("pack_nonlinear", &pack_nonlinear);
+    m.def("unpack_nonlinear", &unpack_nonlinear);
+}
