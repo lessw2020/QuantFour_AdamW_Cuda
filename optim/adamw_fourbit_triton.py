@@ -297,6 +297,40 @@ def _single_tensor_step(
 
         qx, gen = sqs_quant(exp_avg_sq, shape = param.shape)
 
+def avgs_dequant(qx, shape):
+    """ dequantize the exp_avg
+
+    """
+    x = qx.detach()
+    b, signed = 4, True
+    if isinstance(kwargs['qmap'], torch.Tensor):
+        qmap = kwargs['qmap']
+    else:
+        qmap = kwargs['qmap'][(b, signed)][quant_type]
+    # x = nonlinear_dequant(x, qmap, b, shape=kwargs['scaled_shape'], )
+    num_groups = (shape.numel() + 2047) // 2048
+    grouped_x = ext_quantization.unpack_nonlinear(qx, qmap, b, num_groups, 2048)
+    x = recon_grouped_tensor(grouped_x, shape)
+
+    x = x.mul(max1)
+    shape = kwargs['shape']
+
+    # reconstruct grouped tensor
+    numel = shape.numel()
+    recon_flatten = grouped_tensor.flatten()[:numel]
+    recon = recon_flatten.view(shape)
+    if x.stride() != stride:
+        recon_x = torch.empty_strided(x.shape, stride, dtype=dtype, layout=torch.strided, device=x.device)
+        recon_x.copy_(x)
+        del x
+        return recon_x
+    else:
+        x = x.to(dtype=dtype)
+        return x
+
+
+
+
 def get_sqs_statistics(x, **kwargs):
     qx = x.abs()
     max_dims = []
