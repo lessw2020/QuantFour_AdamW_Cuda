@@ -5,7 +5,7 @@ import torch.distributed as dist
 from dataclasses import dataclass
 
 
-__all__= ["AdamW_FourBit_Triton"]
+__all__= ["AdamW_QuantFour"]
 
 @dataclass
 class QuantParams:
@@ -40,7 +40,7 @@ def _get_qenable_fn(p, threshold) -> bool:
         return False
     return True
 
-class AdamW_FourBit_Triton(torch.optim.Optimizer):
+class AdamW_QuantFour(torch.optim.Optimizer):
     """ 4bit AdamW with Triton fusion
     based on lpmm 4bit Optimizers """
 
@@ -69,11 +69,11 @@ class AdamW_FourBit_Triton(torch.optim.Optimizer):
         if dist.is_initialized():
             seed = torch.randint(1<<31, size=[], device=torch.device('cuda'))
             dist.broadcast(seed, src=0)
-            init_random_generator(dist.get_rank(), seed.item()) #avoid stochastic rounding
 
-        self.config_q_m = FirstMoment()
-        self.config_q_sqm = SecondMoment()
+        self.config_momentum = FirstMoment
+        self.config_variance = SecondMoment
         self.qmaps = {}
+
 
         defaults = dict(
             lr = lr,
