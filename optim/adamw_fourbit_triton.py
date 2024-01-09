@@ -34,6 +34,7 @@ class SecondMoment(QuantParams):
     quant_type = 'power-1'
     round_type = 'real-nearest'
     signed = False
+    threshold = 4096
 
 def _get_qenable_fn(p, threshold) -> bool:
     if threshold and p.numel() <= threshold:
@@ -73,6 +74,11 @@ class AdamW_QuantFour(torch.optim.Optimizer):
         self.config_momentum = FirstMoment
         self.config_variance = SecondMoment
         self.qmaps = {}
+        self.momentum_qmap = torch.tensor([-0.8875, -0.6625, -0.4375, -0.2125, -0.0775, -0.0325, -0.0055,  0.0000,
+         0.0055,  0.0325,  0.0775,  0.2125,  0.4375,  0.6625,  0.8875,  1.0000])
+
+         self.variance_qmap = torch.tensor([0.0625, 0.1250, 0.1875, 0.2500, 0.3125, 0.3750, 0.4375, 0.5000, 0.5625,
+        0.6250, 0.6875, 0.7500, 0.8125, 0.8750, 0.9375, 1.0000])
 
 
         defaults = dict(
@@ -167,6 +173,8 @@ class AdamW_QuantFour(torch.optim.Optimizer):
         exp_avgs_sqs_qmap,
 
     ):
+        print(f"{exp_avgs_qmap=}")
+        print(f"{exp_avgs_sqs_qmap=}")
         for p in group["params"]:
             if p.grad is None:
                 continue
@@ -193,7 +201,7 @@ class AdamW_QuantFour(torch.optim.Optimizer):
             #exp_avg_sqs_q_enabled.append(self.override_q_enable[id(p)] if id(p) in self.override_q_enable else state["exp_avg_sq_qstate"]["enable"])
             #exp_avgs_q_overhead.append(state["exp_avg_qstate"]["overhead"])
             #exp_avg_sqs_q_overhead.append(state["exp_avg_sq_qstate"]["overhead"])
-            exp_avgs_qmap.append(state["exp_avg_qstate"]["qmap"])
+            # exp_avgs_qmap.append(state["exp_avg_qstate"]["qmap"])
             # exp_avg_sqs_qmap.append(state["exp_avg_sq_qstate"]["qmap"])
 
     @torch.no_grad()
