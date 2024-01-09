@@ -98,6 +98,7 @@ class AdamW_QuantFour(torch.optim.Optimizer):
 
     def init_qstate(self, p, state_name):
         state = self.state[p]
+        print(f"{state=}")
         field = f"{state_name}_qstate"
         state[field] = {
             "enable": True,
@@ -107,7 +108,7 @@ class AdamW_QuantFour(torch.optim.Optimizer):
         subconfig = self.get_subqconfig(state_name)
         state[field][
             "enable"
-        ] = _get_qenable_fn(p, subconfig.THRESHOLD)
+        ] = _get_qenable_fn(p, subconfig.threshold)
 
         md = self.get_qmetadata_by_state_name(state_name)
         qmap_key = (md['quant_type'], md['b'], md['signed'])
@@ -115,6 +116,7 @@ class AdamW_QuantFour(torch.optim.Optimizer):
             self.qmaps[qmap_key] = create_general_qmap(*qmap_key)
         self.qmaps[qmap_key] = self.qmaps[qmap_key].to(p.device)
         state[field]["qmap"] = self.qmaps[qmap_key]
+        print(f"completing state for {state_name=}, with {state=}")
 
 
     def __setstate__(self, state: Dict[str, Any]) -> None:
@@ -130,10 +132,10 @@ class AdamW_QuantFour(torch.optim.Optimizer):
                 s['step'] = torch.tensor(float(s["step"]))
 
     def get_subqconfig(self, optimizer_state_name):
-        if optimizer_state_name == "exp_avg":
-            return self.config_q_m
-        elif optimizer_state_name == "exp_avg_sq":
-            return self.config_q_sqm
+        if optimizer_state_name == "momentum":
+            return self.config_momentum
+        elif optimizer_state_name == "variance":
+            return self.config_variance
         else:
             raise ValueError(f" invalid state name {optimizer_state_name=}")
 
@@ -161,10 +163,10 @@ class AdamW_QuantFour(torch.optim.Optimizer):
             if len(state) ==0:
                 state['step'] = torch.tensor(0.0)
                 state['exp_avg'] = torch.zeros((), dtype= torch.float, device=p.device)
-                self.init_qstate(p,"exp_avg")
+                self.init_qstate(p,"momentum")
 
                 state["exp_avg_sq"] = torch.zeros((), dtype = torch.float, device=p.device)
-                self.init_qstate(p, "exp_avg_sq")
+                self.init_qstate(p, "variance")
             # ------ end state init
 
             state_steps.append(state["step"])

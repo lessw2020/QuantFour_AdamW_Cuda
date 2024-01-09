@@ -36,6 +36,18 @@ class TestAdamw4Bit_Optimizer:
             betas=betas,
             weight_decay=weight_decay)
 
+        # Verify params are equal initially
+        model_orig_params = [p.clone() for p in model.parameters()]
+        for p1, p2 in zip(model_clone.parameters(), model_orig_params):
+            assert_expected(p1, p2)
+
+        for i in range(1):
+            inp = torch.randn(5, 5, device=next(model.parameters()).device)
+            model(inp).sum().backward()
+            model_clone(inp).sum().backward()
+            adam_opt.step()
+            fourbit_adamw_opt.step()
+
 
     def _test_adam_equivalence(self, model, model_clone, config_path):
         # Test non-default options
@@ -51,7 +63,6 @@ class TestAdamw4Bit_Optimizer:
             weight_decay=weight_decay,
             qconfig=config_path,
         )
-
 
 
         # Verify params are equal initially
