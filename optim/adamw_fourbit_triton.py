@@ -35,13 +35,6 @@ class SecondMoment(QuantParams):
     round_type = 'real-nearest'
     signed = False
 
-
-def init_random_generator(gpu, seed = 2020):
-    global random_generator
-    if random_generator is None:
-        random_generator = torch.Generator(device=gpu)
-    random_generator.manual_seed(seed)
-
 def _get_qenable_fn(p, threshold) -> bool:
     if threshold and p.numel() <= threshold:
         return False
