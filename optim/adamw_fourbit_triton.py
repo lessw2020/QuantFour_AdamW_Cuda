@@ -268,17 +268,14 @@ def _single_tensor_step(
 
         if q_exp_avg.numel() < 2:
             q_exp_avg.data = exp_avg = torch.zeros_like(param, memory_format=torch.preserve_format)
-        elif q_enabled:
-            exp_avg = avgs_dequant(q_exp_avg, shape = param.shape)
         else:
-            exp_avg = q_exp_avg
+            exp_avg = avgs_dequant(q_exp_avg, shape = param.shape)
+
 
         if q_exp_avg_sq.numel() < 2:
             q_exp_avg_sq.data = exp_avg_sq = torch.zeros_like(param, memory_format = torch.preserve_format)
-        elif sq_enabled:
-            exp_avg_sq = sqs_dequant(q_exp_avg_sq, shape = param.shape,  )
         else:
-            exp_avg_sq = q_exp_avg_sq
+            exp_avg_sq = sqs_dequant(q_exp_avg_sq, shape = param.shape,  )
 
         # update avgs
         exp_avg.lerp_(grad, 1-beta1)
@@ -318,7 +315,7 @@ def compute_sqs_scale_tensor(max_dims):
 
 
 
-def sqs_qaunt(x, shape):
+def sqs_quant(x, shape):
     """ quantize the exp_avg_sq
 
     """
@@ -357,8 +354,16 @@ def nonlinear_quant(x, qmap, b, round_type='real-nearest'):
         grouped_qx = group_tensor(qx, 2048)
         return ext_quantization.pack_nonlinear(grouped_qx, qmap, b, stochastic)
 
+    idx = real_nonlinear_quant(qx, qmap, b, False)
+    return idx
 
+def nonlinear_de_quant(qx, qmap, b, shape, round_type='real-nearest'):
 
+    num_groups = (shape.numel() + 2047) // 2048
+    grouped_x = ext_quantization.unpack_nonlinear(qx, qmap, b, num_groups, 2048)
+    x = recon_grouped_tensor(grouped_x, shape)
+
+    return x
 
 def avgs_quant(x, shape):
     """ quantize the exp_avg
@@ -379,20 +384,11 @@ def avgs_quant(x, shape):
     scaled_shape = qx.shape
 
     # metadata = max_per_row, scaled_shape
-
-    qx = nonlinear_quant(qx)
-
-    return qx, metadata
-
-
-def nonlinear_quant(qx):
+    # quantize
     grouped_qx = group_tensor(qx, 2048)
-    res = cuda_kernel_pack_nonlinear(grouped_qx)
+    qx = cuda_kernel_pack_nonlinear(grouped_qx)
 
-
-
-
-
+    return qx, meta
 
 
 def group_tensor(x: Tensor, group_size: int):
