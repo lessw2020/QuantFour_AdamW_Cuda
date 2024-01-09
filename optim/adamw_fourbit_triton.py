@@ -14,7 +14,7 @@ class QuantParams:
     scale_type: str
     quant_type: str
     round_type: str
-    signed: bool 
+    signed: bool
     threshold: int
     enable: bool = True
 
@@ -53,11 +53,11 @@ class AdamW_FourBit_Triton(torch.optim.Optimizer):
 
     def __init__(
             self,
-            params, 
+            params,
             lr = 1e-3,
-            betas = (0.9, 0.999), 
+            betas = (0.9, 0.999),
             eps = 1e-8,
-            weight_decay = 1e-2, 
+            weight_decay = 1e-2,
             *,
             fused: Optional[bool] = False,
     ):
@@ -77,7 +77,7 @@ class AdamW_FourBit_Triton(torch.optim.Optimizer):
             seed = torch.randint(1<<31, size=[], device=torch.device('cuda'))
             dist.broadcast(seed, src=0)
             init_random_generator(dist.get_rank(), seed.item()) #avoid stochastic rounding
-        
+
         self.config_q_m = FirstMoment()
         self.config_q_sqm = SecondMoment()
         self.qmaps = {}
@@ -86,11 +86,11 @@ class AdamW_FourBit_Triton(torch.optim.Optimizer):
             lr = lr,
             betas=betas,
             eps = eps,
-            weight_decay = weight_decay, 
+            weight_decay = weight_decay,
             fused = fused,
         )
         super().__init__(params, defaults)
-    
+
     def get_qmetadata_by_state_name(self, optimizer_state_name):
         subconfig = self.get_subqconfig(optimizer_state_name)
         md = dict(
@@ -107,7 +107,7 @@ class AdamW_FourBit_Triton(torch.optim.Optimizer):
         state = self.state[p]
         field = f"{state_name}_qstate"
         state[field] = {
-            "enable": True, 
+            "enable": True,
             "overhead": dict(),
             "qmap": None,
         }
@@ -115,7 +115,7 @@ class AdamW_FourBit_Triton(torch.optim.Optimizer):
         state[field][
             "enable"
         ] = _get_qenable_fn(p, subconfig.THRESHOLD)
-        
+
         md = self.get_qmetadata_by_state_name(state_name)
         qmap_key = (md['quant_type'], md['b'], md['signed'])
         if qmap_key not in self.qmaps:
@@ -123,7 +123,7 @@ class AdamW_FourBit_Triton(torch.optim.Optimizer):
         self.qmaps[qmap_key] = self.qmaps[qmap_key].to(p.device)
         state[field]["qmap"] = self.qmaps[qmap_key]
 
-    
+
     def __setstate__(self, state: Dict[str, Any]) -> None:
         super().__setstate__(state)
         for group in self.param_groups:
@@ -135,7 +135,7 @@ class AdamW_FourBit_Triton(torch.optim.Optimizer):
         if not step_is_tensor:
             for s in state_values:
                 s['step'] = torch.tensor(float(s["step"]))
-    
+
     def get_subqconfig(self, optimizer_state_name):
         if optimizer_state_name == "exp_avg":
             return self.config_q_m
@@ -146,15 +146,15 @@ class AdamW_FourBit_Triton(torch.optim.Optimizer):
 
     def _init_group(
         self,
-        group, 
+        group,
         params_with_grad,
         grads,
-        exp_avgs, 
+        exp_avgs,
         exp_avgs_sqs,
         state_steps,
         exp_avgs_qmap,
         exp_avgs_sqs_qmap,
-    
+
     ):
         for p in group["params"]:
             if p.grad is None:
@@ -164,7 +164,7 @@ class AdamW_FourBit_Triton(torch.optim.Optimizer):
             grads.append(p.grad)
             state = self.state[p]
 
-            # lazy init state ------    
+            # lazy init state ------
             if len(state) ==0:
                 state['step'] = torch.tensor(0.0)
                 state['exp_avg'] = torch.zeros((), dtype= torch.float, device=p.device)
@@ -187,14 +187,14 @@ class AdamW_FourBit_Triton(torch.optim.Optimizer):
 
     @torch.no_grad()
     def step(self, closure=None):
-        """ single optimization step 
+        """ single optimization step
         """
 
         loss = None
         if closure:
             with torch.enable_grad:
-                loss = closure() 
-        
+                loss = closure()
+
         for group in self.param_groups:
             params_with_grad = []
             grads = []
@@ -204,7 +204,7 @@ class AdamW_FourBit_Triton(torch.optim.Optimizer):
             beta1, beta2 = group['betas']
             exp_avgs_qmap = []
             exp_avg_sqs_qmap = []
-            
+
             self._init_group(
                 group,
                 params_with_grad,
@@ -214,7 +214,7 @@ class AdamW_FourBit_Triton(torch.optim.Optimizer):
                 state_steps,
                 exp_avgs_qmap,
                 exp_avg_sqs_qmap,
-            ) 
+            )
 
             kwargs = dict(
                 params_with_grad = params_with_grad,
@@ -233,7 +233,7 @@ class AdamW_FourBit_Triton(torch.optim.Optimizer):
             )
 
             _single_tensor_step(**kwargs)
-            
+
 
 def _single_tensor_step(
         params_with_grad: List[Tensor],
@@ -249,7 +249,7 @@ def _single_tensor_step(
         lr: float,
         weight_decay: float,
         eps: float
-        
+
 ):
     for i, param in enumerate(params_with_grad):
         grad = grads[i]
@@ -263,7 +263,7 @@ def _single_tensor_step(
         param.mul_(1 - lr * weight_decay)
 
         # dequant
-        q_enabled = True # todo 
+        q_enabled = True # todo
         sq_enabled = True
 
         if q_exp_avg.numel() < 2:
@@ -272,7 +272,7 @@ def _single_tensor_step(
             exp_avg = avgs_dequant(q_exp_avg, shape = param.shape)
         else:
             exp_avg = q_exp_avg
-        
+
         if q_exp_avg_sq.numel() < 2:
             q_exp_avg_sq.data = exp_avg_sq = torch.zeros_like(param, memory_format = torch.preserve_format)
         elif sq_enabled:
@@ -300,9 +300,68 @@ def _single_tensor_step(
 
         qx, gen = sqs_quant(exp_avg_sq, shape = param.shape)
 
+def get_sqs_statistics(x, **kwargs):
+    qx = x.abs()
+    max_dims = []
+    for i in range(x.dim()):
+        new_max = max_reduce_except_dim(qx, i)
+        max_dims.append(new_max)
+    return max_dims
+
+def compute_sqs_scale_tensor(max_dims):
+    rank = len(max_dims)
+    scale_tensor = max_dims[0].clone()
+    for i in range(1, rank):
+        # broadcasting
+        scale_tensor = torch.min(scale_tensor, max_dims[i])
+    return scale_tensor
+
+
+
+def sqs_qaunt(x, shape):
+    """ quantize the exp_avg_sq
+
+    """
+    group_size = 128
+
+    qx = x.detach()
+
+    meta = {}
+    meta['dtype'] = x.dtype
+    meta['stride'] = x.stride()
+
+    # quant scaling for sqs
+    max_dims = get_sqs_statistics(qx.abs())
+    st = compute_sqs_scale_tensor(max_dims)
+    meta['max_dims'] = max_dims
+    qx = qx.div(st)
+
+    b, signed = 4, False
+    if isinstance(kwargs['qmap'], torch.Tensor):
+        qmap = kwargs['qmap']
+    else:
+        qmap = kwargs['qmap'][(b, signed)][quant_type]
+
+    qx = nonlinear_quant(qx, qmap, b, round_type='real-nearest')
+
+
+    return qx, generated_metadata
+
+
+def nonlinear_quant(x, qmap, b, round_type='real-nearest'):
+    """ quantize the exp_avg_sq
+
+    """
+    def real_nonlinear_quant(qx, qmap, b, stochastic):
+        #kernel
+        grouped_qx = group_tensor(qx, 2048)
+        return ext_quantization.pack_nonlinear(grouped_qx, qmap, b, stochastic)
+
+
+
 
 def avgs_quant(x, shape):
-    """ quantize the exp_avg 
+    """ quantize the exp_avg
 
     """
     group_size = 128
@@ -330,7 +389,7 @@ def nonlinear_quant(qx):
     grouped_qx = group_tensor(qx, 2048)
     res = cuda_kernel_pack_nonlinear(grouped_qx)
 
-    
+
 
 
 
@@ -346,14 +405,14 @@ def group_tensor(x: Tensor, group_size: int):
         # pad
         new_num_flat = (num_flat // group_size +1) * group_size
         delta = new_num_flat - num_flat
-        
+
         x_flat = torch.cat([x_flat, torch.zeros([delta], dtype = x.dtype, device = x.device)], dim=0)
     x_groups = x_flat.view(-1, group_size)
     return x_groups
 
 def max_reduce_except_dim(input, dim):
-    """ compute max along all dims except provided dim """ 
-    rank = input.dim() 
+    """ compute max along all dims except provided dim """
+    rank = input.dim()
     result = input
     if rank:
         assert dim < rank, f"reducing tensor with {rank} dimensions failed"
@@ -361,5 +420,3 @@ def max_reduce_except_dim(input, dim):
             if d != dim:
                 result = result.max(dim=d, keepdim=True).values
     return result
-
-
