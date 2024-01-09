@@ -39,19 +39,24 @@ def create_qmap(quant_type, bit, signed):
     # SQM = scale via rank1
     # SQM_QT = power-1
 
-    if quant_type == 'first_moment':
-        # defaults: qt = nonlinear, signed = True, bit =4, 
+    if quant_type == 'nonlinear':
+        # defaults: qt = nonlinear, signed = True, bit =4,
         return create_dynamic_map(signed, bit-1, bit if signed else bit-1)
-    elif quant_type == 'second_moment':
+    elif quant_type == 'power-1':
         # defaults = qt = power1, bit = 4, signed = False
         return create_pow_map(bit, signed, 1)
 
+    else:
+        raise ValueError(
+            f"No support for {quant_type} quant type."
+)
+
 # nonlinear
 def create_dynamic_map(signed=True, max_exponent_bits=3, total_bits=4):
-    """ create dynamic quantization map 
-    uses dynamic exponent and fraction. 
-    as exponent portion grows, fraction reduces. 
-    
+    """ create dynamic quantization map
+    uses dynamic exponent and fraction.
+    as exponent portion grows, fraction reduces.
+
     """
     data = []
     non_sign_bits = total_bits - (1 if signed else 0)
@@ -67,7 +72,7 @@ def create_dynamic_map(signed=True, max_exponent_bits=3, total_bits=4):
 
         if signed:
             data+=(-(10** (-(max_exponent_bits-1)+i)) * means).tolist()
-        
+
         if additional_items > 0:
             boundaries = torch.linspace(0.1,1, additional_items +1)
             means = (boundaries[:-1] + boundaries[1:]) / 2.0
@@ -77,10 +82,11 @@ def create_dynamic_map(signed=True, max_exponent_bits=3, total_bits=4):
     data.append(0)
     data.append(1.0)
     data.sort()
+    print(f"created dynamic map = {data=}")
     return torch.Tensor(data)
 
 def create_pow_map(bits=4, signed=False, power=1):
-    """ create power map 
+    """ create power map
     for 4bit second moment:
       qmap=tensor([0.0625, 0.1250, 0.1875, 0.2500, 0.3125, 0.3750, 0.4375, 0.5000, 0.5625,
         0.6250, 0.6875, 0.7500, 0.8125, 0.8750, 0.9375, 1.0000])
@@ -90,8 +96,7 @@ def create_pow_map(bits=4, signed=False, power=1):
         if power > 1:
             qmap = qmap**power
     else:
-        qmap = torch.linspace(-1,1,(2**bits)) 
+        qmap = torch.linspace(-1,1,(2**bits))
         if power > 1:
             qmap = qmap.sign() * (qmap.abs() ** power)
     return qmap
-

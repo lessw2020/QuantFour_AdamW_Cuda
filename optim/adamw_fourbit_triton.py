@@ -3,7 +3,7 @@ from torch import Tensor
 from typing import Any, Dict, List, Optional
 import torch.distributed as dist
 from dataclasses import dataclass
-
+from .quant_opt_base import create_qmap, create_dynamic_map, create_pow_map
 
 __all__= ["AdamW_QuantFour"]
 
@@ -31,7 +31,7 @@ class SecondMoment(QuantParams):
     bits = 4
     group_size = 128
     scale_type = 'rank1'
-    quant_type = 'power1'
+    quant_type = 'power-1'
     round_type = 'real-nearest'
     signed = False
 
@@ -111,13 +111,29 @@ class AdamW_QuantFour(torch.optim.Optimizer):
         ] = _get_qenable_fn(p, subconfig.threshold)
 
         md = self.get_qmetadata_by_state_name(state_name)
+        print(f"{md=}")
         qmap_key = (md['quant_type'], md['b'], md['signed'])
+        print(f"{qmap_key=}")
+
         if qmap_key not in self.qmaps:
-            self.qmaps[qmap_key] = create_general_qmap(*qmap_key)
-        self.qmaps[qmap_key] = self.qmaps[qmap_key].to(p.device)
+            self.qmaps[qmap_key] = create_qmap(*qmap_key)
+            print(f"created qmap = {self.qmaps[qmap_key]=}")
+        # self.qmaps[qmap_key] = self.qmaps[qmap_key].to(p.device)
         state[field]["qmap"] = self.qmaps[qmap_key]
         print(f"completing state for {state_name=}, with {state=}")
 
+
+    def create_qmap(quant_type, bit, signed):
+        """ create qmap for quantization """
+        if quant_type == 'nonlinear':
+            return create_dynamic_map(signed, bit - 1, bit if signed else bit - 1)
+        elif quant_type == 'power-1':
+            return create_pow_map(bit, signed, 1)
+
+        else:
+            raise ValueError(
+                f"Not support {quant_type} quant type."
+            )
 
     def __setstate__(self, state: Dict[str, Any]) -> None:
         super().__setstate__(state)
