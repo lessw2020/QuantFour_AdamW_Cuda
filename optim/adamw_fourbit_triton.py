@@ -75,10 +75,10 @@ class AdamW_QuantFour(torch.optim.Optimizer):
         self.config_variance = SecondMoment
         self.qmaps = {}
         self.momentum_qmap = torch.tensor([-0.8875, -0.6625, -0.4375, -0.2125, -0.0775, -0.0325, -0.0055,  0.0000,
-         0.0055,  0.0325,  0.0775,  0.2125,  0.4375,  0.6625,  0.8875,  1.0000])
+            0.0055,  0.0325,  0.0775,  0.2125,  0.4375,  0.6625,  0.8875,  1.0000])
 
-         self.variance_qmap = torch.tensor([0.0625, 0.1250, 0.1875, 0.2500, 0.3125, 0.3750, 0.4375, 0.5000, 0.5625,
-        0.6250, 0.6875, 0.7500, 0.8125, 0.8750, 0.9375, 1.0000])
+        self.variance_qmap = torch.tensor([0.0625, 0.1250, 0.1875, 0.2500, 0.3125, 0.3750, 0.4375, 0.5000, 0.5625,
+            0.6250, 0.6875, 0.7500, 0.8125, 0.8750, 0.9375, 1.0000])
 
 
         defaults = dict(
@@ -104,7 +104,7 @@ class AdamW_QuantFour(torch.optim.Optimizer):
 
     def init_qstate(self, p, state_name):
         state = self.state[p]
-        print(f"{state=}")
+        #print(f"{state=}")
         field = f"{state_name}_qstate"
         state[field] = {
             "enable": True,
@@ -117,16 +117,16 @@ class AdamW_QuantFour(torch.optim.Optimizer):
         ] = _get_qenable_fn(p, subconfig.threshold)
 
         md = self.get_qmetadata_by_state_name(state_name)
-        print(f"{md=}")
+        #print(f"{md=}")
         qmap_key = (md['quant_type'], md['b'], md['signed'])
-        print(f"{qmap_key=}")
+        #print(f"{qmap_key=}")
 
         if qmap_key not in self.qmaps:
             self.qmaps[qmap_key] = create_qmap(*qmap_key)
             print(f"created qmap = {self.qmaps[qmap_key]=}")
         # self.qmaps[qmap_key] = self.qmaps[qmap_key].to(p.device)
         state[field]["qmap"] = self.qmaps[qmap_key]
-        print(f"completing state for {state_name=}, with {state=}")
+        #print(f"completing state for {state_name=}, with {state=}")
 
 
     def create_qmap(quant_type, bit, signed):
@@ -173,8 +173,8 @@ class AdamW_QuantFour(torch.optim.Optimizer):
         exp_avgs_sqs_qmap,
 
     ):
-        print(f"{exp_avgs_qmap=}")
-        print(f"{exp_avgs_sqs_qmap=}")
+        #print(f"{exp_avgs_qmap=}")
+        #print(f"{exp_avgs_sqs_qmap=}")
         for p in group["params"]:
             if p.grad is None:
                 continue
@@ -285,6 +285,7 @@ def _single_tensor_step(
         q_enabled = True # todo
         sq_enabled = True
 
+        print(f"288: {step_t=}, and {q_exp_avg=}")
         if q_exp_avg.numel() < 2:
             q_exp_avg.data = exp_avg = torch.zeros_like(param, memory_format=torch.preserve_format)
         else:

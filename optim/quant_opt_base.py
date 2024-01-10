@@ -82,7 +82,7 @@ def create_dynamic_map(signed=True, max_exponent_bits=3, total_bits=4):
     data.append(0)
     data.append(1.0)
     data.sort()
-    print(f"created dynamic map = {data=}")
+    #print(f"created dynamic map = {data=}")
     return torch.Tensor(data)
 
 def create_pow_map(bits=4, signed=False, power=1):
