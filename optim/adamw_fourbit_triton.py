@@ -465,11 +465,51 @@ def avgs_quant(x, shape):
     # quantize
     grouped_qx = group_tensor(qx, 2048)
     # qx = cuda_kernel_pack_nonlinear(grouped_qx)
+    qx = quant_nonlinear(grouped_qx)
     # let's do this in place for now
     print(f"461: {grouped_qx=}")
     print(f"{grouped_qx.shape=}")
 
     return qx, meta
+
+def quant_nonlinear(x,):
+    """ quantize the exp_avg
+
+    """
+    print(f"479: quant func received {x.shape=}, \n {x=}")
+    bits = 4
+    #kernel
+    num_groups = x.data.size(0)
+    group_size = x.data.size(1)
+    print(f"483: {num_groups=}, {group_size=}")
+
+    #// Compute total bits
+    work_per_int = 8 / bits
+    workint_per_thread = 4
+    work_per_thread = work_per_int * workint_per_thread
+    assert 8 % bits == 0
+    assert group_size % work_per_thread == 0
+
+    total_bits = bits * (num_groups * group_size)
+    print(f"488: {total_bits=}")
+    packed_size = int((total_bits + 8) / 8)
+    print(f"490: {packed_size=}")
+    packed = torch.empty((packed_size,),dtype=torch.int8, device=x.device)
+    # Tensor packed = torch::empty({(total_bits + 8) / 8,}, options);
+    #print(f"493: {packed.shape=}")
+
+    '''// Random number generator
+    int threads = group_size;
+    auto gen = at::check_generator<at::CUDAGeneratorImpl>(at::cuda::detail::getDefaultCUDAGenerator());
+    std::pair<uint64_t, uint64_t> rng_engine_inputs;
+    {
+        // See Note [Acquire lock when using random generators]
+        std::lock_guard<std::mutex> lock(gen->mutex_);
+        rng_engine_inputs = gen->philox_engine_inputs(threads * work_per_thread);
+    }
+    // TORCH_CHECK(stochastic);
+    '''
+    return x
 
 
 def group_tensor(x: Tensor, group_size: int):
