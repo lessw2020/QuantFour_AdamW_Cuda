@@ -328,7 +328,7 @@ def _single_tensor_step(
 
 
         # quantize
-        #qx, gen = avgs_quant(exp_avg, shape = param.shape)
+        qx, gen = avgs_quant(exp_avg, shape = param.shape)
         #q_exp_avg.data = qx
 
         #qx, gen = sqs_quant(exp_avg_sq, shape = param.shape)
@@ -442,6 +442,8 @@ def avgs_quant(x, shape):
     group_size = 128
 
     qx = x.detach()
+    print(f"445: {qx=}")
+    print(f"{qx.shape=}")
 
     meta = {}
     meta['dtype'] = x.dtype
@@ -449,14 +451,23 @@ def avgs_quant(x, shape):
 
     # quant scaling for exp_avgs
     qx = group_tensor(x, group_size)
+    print(f"453: qx after group {qx=}")
+    print(f"{qx.shape=}\n+++++++++++++++++")
+
     max_per_row = max_reduce_except_dim(qx.abs(), 0)
+    print(f"458: {max_per_row=}")
     qx = qx.div(max_per_row)
+    print(f"460: {qx=}")
     scaled_shape = qx.shape
+    print(f"462: {scaled_shape=}")
 
     # metadata = max_per_row, scaled_shape
     # quantize
     grouped_qx = group_tensor(qx, 2048)
-    qx = cuda_kernel_pack_nonlinear(grouped_qx)
+    # qx = cuda_kernel_pack_nonlinear(grouped_qx)
+    # let's do this in place for now
+    print(f"461: {grouped_qx=}")
+    print(f"{grouped_qx.shape=}")
 
     return qx, meta
 
