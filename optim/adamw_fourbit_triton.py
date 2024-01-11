@@ -4,6 +4,7 @@ from typing import Any, Dict, List, Optional
 import torch.distributed as dist
 from dataclasses import dataclass
 from .quant_opt_base import create_qmap, create_dynamic_map, create_pow_map
+import math
 
 __all__= ["AdamW_QuantFour"]
 
@@ -176,11 +177,13 @@ class AdamW_QuantFour(torch.optim.Optimizer):
         #print(f"{exp_avgs_qmap=}")
         #print(f"{exp_avgs_sqs_qmap=}")
         for p in group["params"]:
+
             if p.grad is None:
                 continue
             if p.grad.is_sparse:
                 raise RuntimeError("AdamW_FourBit does not support sparse gradients")
             grads.append(p.grad)
+            params_with_grad.append(p)
             state = self.state[p]
 
             # lazy init state ------
@@ -270,7 +273,11 @@ def _single_tensor_step(
         eps: float
 
 ):
+    # print(f"273: In Step function")
+    # print(f" len params with grad {len(params_with_grad)}, len grads {len(grads)}, len exp_avgs {len(exp_avgs)}, len exp_avg_sqs    {len(exp_avg_sqs)}, len state_steps {len(state_steps)}")
     for i, param in enumerate(params_with_grad):
+        #print(f"step loop {i}, {param[0]=}")
+        #print(f"++++++++++++++++++++++++")
         grad = grads[i]
         q_exp_avg = exp_avgs[i]
         q_exp_avg_sq = exp_avg_sqs[i]
@@ -285,7 +292,7 @@ def _single_tensor_step(
         q_enabled = True # todo
         sq_enabled = True
 
-        print(f"288: {step_t=}, and {q_exp_avg=}")
+        #print(f"288: {step_t=}, and {q_exp_avg=}")
         if q_exp_avg.numel() < 2:
             q_exp_avg.data = exp_avg = torch.zeros_like(param, memory_format=torch.preserve_format)
         else:
@@ -298,24 +305,33 @@ def _single_tensor_step(
             exp_avg_sq = sqs_dequant(q_exp_avg_sq, shape = param.shape,  )
 
         # update avgs
+
         exp_avg.lerp_(grad, 1-beta1)
-        exp_avg_sq.mul_(beta2).addcumul_(grad, grad, value = 1-beta2)
+        exp_avg_sq.mul_(beta2).addcmul_(grad, grad, value = 1-beta2)
+
 
         step = step_t.item()
         bias_corr1 = 1-beta1** step
         bias_corr2 = 1 - beta2 **step
         step_size = lr / bias_corr1
-        bias_corr2_sqrt = bias_corr2.sqrt()
+        #if isinstance(bias_corr2, torch.Tensor):
+        #    bias_corr2_sqrt = bias_corr2.sqrt()
+        #else:
+        bias_corr2_sqrt = math.sqrt(bias_corr2)
 
         denom = (exp_avg_sq.sqrt() / bias_corr2_sqrt).add_(eps)
+        #print(f"321: {denom=}")
         # weight update
+        #print(f"323: {param=}")
         param.addcdiv_(exp_avg, denom, value =-step_size)
+        #print(f"325: after add cdiv {param=}")
+
 
         # quantize
-        qx, gen = avgs_quant(exp_avg, shape = param.shape)
-        q_exp_avg.data = qx
+        #qx, gen = avgs_quant(exp_avg, shape = param.shape)
+        #q_exp_avg.data = qx
 
-        qx, gen = sqs_quant(exp_avg_sq, shape = param.shape)
+        #qx, gen = sqs_quant(exp_avg_sq, shape = param.shape)
 
 def avgs_dequant(qx, shape):
     """ dequantize the exp_avg

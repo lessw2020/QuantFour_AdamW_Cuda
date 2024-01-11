@@ -38,15 +38,29 @@ class TestAdamw4Bit_Optimizer:
 
         # Verify params are equal initially
         model_orig_params = [p.clone() for p in model.parameters()]
+        #print(f"{model_orig_params=}")
         for p1, p2 in zip(model_clone.parameters(), model_orig_params):
             assert_expected(p1, p2)
+        print(f"len model {len(model_orig_params)}")
 
         for i in range(1):
+            adam_opt.zero_grad(set_to_none=True)
+            fourbit_adamw_opt.zero_grad(set_to_none=True)
             inp = torch.randn(5, 5, device=next(model.parameters()).device)
             model(inp).sum().backward()
             model_clone(inp).sum().backward()
             adam_opt.step()
             fourbit_adamw_opt.step()
+
+        # Ensure params are modified from original
+            if i == 0:
+                for p1, p2 in zip(model.parameters(), model_orig_params):
+                    assert not torch.equal(p1, p2)
+                    #print(f"{p1[0:10]=},")
+                    #print(f"{p2[0:10]=}")
+                print(f"confirm modified params")
+            #for p1, p2 in zip(model.parameters(), model_clone.parameters()):
+            #    assert_expected(p1, p2)
 
 
     def _test_adam_equivalence(self, model, model_clone, config_path):
