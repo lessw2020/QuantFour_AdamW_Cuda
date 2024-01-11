@@ -53,14 +53,17 @@ class TestAdamw4Bit_Optimizer:
             fourbit_adamw_opt.step()
 
         # Ensure params are modified from original
-            if i == 0:
+            if i==0:
                 for p1, p2 in zip(model.parameters(), model_orig_params):
                     assert not torch.equal(p1, p2)
                     #print(f"{p1[0:10]=},")
                     #print(f"{p2[0:10]=}")
                 print(f"confirm modified params")
-            #for p1, p2 in zip(model.parameters(), model_clone.parameters()):
-            #    assert_expected(p1, p2)
+        # confirm we match AdamW at each step
+            for p1, p2 in zip(model.parameters(), model_clone.parameters()):
+                assert_expected(p1, p2)
+            print(f"quantfour matches adamw in step {i}")
+
 
 
     def _test_adam_equivalence(self, model, model_clone, config_path):
