@@ -465,17 +465,20 @@ def avgs_quant(x, shape):
     # quantize
     grouped_qx = group_tensor(qx, 2048)
     # qx = cuda_kernel_pack_nonlinear(grouped_qx)
-    qx = quant_nonlinear(grouped_qx)
+    qx = momentum_quant_nonlinear(grouped_qx)
     # let's do this in place for now
     print(f"461: {grouped_qx=}")
     print(f"{grouped_qx.shape=}")
 
     return qx, meta
 
-def quant_nonlinear(x,):
+def momentum_quant_nonlinear(x,):
     """ quantize the exp_avg
 
     """
+    qmap = torch.tensor([-0.8875, -0.6625, -0.4375, -0.2125, -0.0775, -0.0325, -0.0055,  0.0000,
+            0.0055,  0.0325,  0.0775,  0.2125,  0.4375,  0.6625,  0.8875,  1.0000])
+
     print(f"479: quant func received {x.shape=}, \n {x=}")
     bits = 4
     #kernel
@@ -494,22 +497,111 @@ def quant_nonlinear(x,):
     print(f"488: {total_bits=}")
     packed_size = int((total_bits + 8) / 8)
     print(f"490: {packed_size=}")
-    packed = torch.empty((packed_size,),dtype=torch.int8, device=x.device)
+    packed = torch.zeros((packed_size,),dtype=torch.uint8, device=x.device)
     # Tensor packed = torch::empty({(total_bits + 8) / 8,}, options);
     #print(f"493: {packed.shape=}")
 
-    '''// Random number generator
-    int threads = group_size;
-    auto gen = at::check_generator<at::CUDAGeneratorImpl>(at::cuda::detail::getDefaultCUDAGenerator());
-    std::pair<uint64_t, uint64_t> rng_engine_inputs;
-    {
-        // See Note [Acquire lock when using random generators]
-        std::lock_guard<std::mutex> lock(gen->mutex_);
-        rng_engine_inputs = gen->philox_engine_inputs(threads * work_per_thread);
+    '''// Pack float16/32 data into int8 bit stream, for bits < 8 and 8 % bit == 0
+template<typename scalar_t, bool STOCHASTIC>
+__global__ void pack_nonlinear_4bit_kernel(int32_t bits,
+                                          const scalar_t* __restrict__ data,
+                                          const float* __restrict__ qmap,
+                                          int8_t* __restrict__ packed,
+                                          std::pair<uint64_t, uint64_t> seeds) {
+  const int group_id = blockIdx.x;
+  const int id_in_group = threadIdx.x;
+  const int64_t global_id = group_id * blockDim.x + id_in_group;
+  const int work_per_int = 8 / bits;
+  const int workint_per_thread = 4;
+  const int work_per_thread = work_per_int << 2;
+  const int8_t mask = (1 << bits) - 1;
+  curandStatePhilox4_32_10_t state;
+  curand_init(seeds.first, global_id, seeds.second, &state);
+
+  for (int i = 0; i < workint_per_thread; i++) {
+    uint8_t local_packed = 0;
+    int64_t packed_id = global_id * workint_per_thread + i;
+    for (int j = 0; j < work_per_int; j++) {
+      const int64_t data_id = global_id * work_per_thread + i * work_per_int + j;
+      const float noise = curand_uniform(&state);
+      const float x = data[data_id];
+      const uint8_t qx = (uint8_t)quantize_bsearch<STOCHASTIC>(qmap, bits, x, noise);
+      local_packed |= ((qx & mask) << (j * bits));
     }
-    // TORCH_CHECK(stochastic);
+
+    packed[packed_id] = local_packed;
+  }
+}
     '''
-    return x
+
+    for index in range(len(x[0])):
+        print(f"{index=}, {x[0][index]=}")
+        val = x[0][index].item()
+        print(f"{val=}")
+        if val ==0:
+            break
+        qitem = bsearch(val,qmap)
+        print(f"544: {qitem=}, {val=}")
+        packed[index] = qitem
+    print(f"\n")
+    print(f"{packed[0:10]=}\n{x[0][0:10]=}\n ")
+    print(f"========================")
+    return qitem
+
+def bsearch(x, qmap):
+    """
+    """
+    low = 0
+    high = 16
+    print(f"546: {qmap[0]=}, {qmap[15]=}, {x=}")
+    if x <= qmap[0]:
+        return low
+    if x >= qmap[15]:
+        return 15
+
+    while low < high:
+        mid = (low + high) // 2
+        if x <= qmap[mid]:
+            high = mid
+        else:
+            low = mid + 1
+
+    rank = 0
+    mid_val = (qmap[low-1] + qmap[low]) * 0.5
+    if mid_val < x:
+        rank = low
+    else:
+        rank = low - 1
+    print (f"564: {x=}, {low=}, {mid_val=}, {qmap[rank]=},")
+    return rank
+    '''
+    int lo = 0;
+    int hi = 1 << bits;
+
+    if (x <= qmap[lo])
+      return lo;
+    if (qmap[hi - 1] <= x)
+      return (hi - 1);
+
+    while (lo < hi){
+      int mi = (lo + hi) >> 1;
+      if (qmap[mi] <= x) lo = mi + 1;
+      else hi = mi;
+    }
+    // return lo - 1;
+
+    int rank = 0;
+    if (STOCHASTIC) {
+      float proba = (x - qmap[lo - 1]) / (qmap[lo] - qmap[lo - 1]);
+      int flag = __float2int_rn(proba + noise - 0.5f);
+      rank = (flag) ? lo : lo - 1;
+    } else {
+      float mid_val = (qmap[lo - 1] + qmap[lo]) * 0.5f;
+      rank = (mid_val < x) ? lo : lo - 1;
+    }
+    return rank;
+}
+    '''
 
 
 def group_tensor(x: Tensor, group_size: int):
