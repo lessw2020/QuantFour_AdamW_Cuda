@@ -367,9 +367,10 @@ def _single_tensor_step(
 
         # quantize
         qx, gen = avgs_quant(exp_avg, shape=param.shape)
-        # q_exp_avg.data = qx
+        # todo - err re: not tensor but should be tensor list
+        #q_exp_avg.data = qx
 
-        # qx, gen = sqs_quant(exp_avg_sq, shape = param.shape)
+        qx, gen = sqs_quant(exp_avg_sq, shape = param.shape)
 
 
 def avgs_dequant(qx, shape):
@@ -438,15 +439,66 @@ def sqs_quant(x, shape):
     meta["max_dims"] = max_dims
     qx = qx.div(st)
 
-    b, signed = 4, False
-    if isinstance(kwargs["qmap"], torch.Tensor):
-        qmap = kwargs["qmap"]
-    else:
-        qmap = kwargs["qmap"][(b, signed)][quant_type]
+    qmap_variance = torch.tensor(
+            [
+                0.0625,
+                0.1250,
+                0.1875,
+                0.2500,
+                0.3125,
+                0.3750,
+                0.4375,
+                0.5000,
+                0.5625,
+                0.6250,
+                0.6875,
+                0.7500,
+                0.8125,
+                0.8750,
+                0.9375,
+                1.0000,
+            ]
+        )
 
-    qx = nonlinear_quant(qx, qmap, b, round_type="real-nearest")
+    qx = sqs_quant_kernel(qx,qmap_variance) #  qmap, b, round_type="real-nearest")
 
     return qx, generated_metadata
+
+def sqs_quant_kernel(x,qmap_variance):
+    """quantize the exp_avg_sq with rank1"""
+    #grouped_qx = group_tensor(qx, 2048)
+    # todo next
+    qx = x.detach() # keep the reference of original tensor
+
+    # save kwargs
+    generated_metadata = {}
+    generated_metadata['dtype'] = x.dtype
+    generated_metadata['stride'] = x.stride()
+
+
+    generated_metadata['dim'] = qx.dim()
+    if qx.dim() == 1: # group
+        group_size = 128
+        qx = group_tensor(qx, group_size)
+        max1 = max_reduce_except_dim(qx.abs(), 0)
+        qx = qx.div(max1)
+        print(f"469: {qx=}")
+        generated_metadata['max1'] = max1
+    else:
+        assert false, "rank1 with dim >1 not supported yet"
+        max_dims = get_sm3_statistics(qx.abs())
+        st = _compute_sm3_scale_tensor(max_dims)
+        generated_metadata['max_dims'] = max_dims
+        generated_metadata['max1'] = None
+        qx = qx.div(st)
+    #generated_metadata.update(md)
+
+
+
+
+
+
+
 
 
 def nonlinear_quant(x, qmap, b, round_type="real-nearest"):
