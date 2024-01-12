@@ -405,7 +405,7 @@ def avgs_dequant(qx, shape):
         return x
 
 
-def get_sqs_statistics(x, **kwargs):
+def get_sqs_tensor_statistics(x, ):
     qx = x.abs()
     max_dims = []
     for i in range(x.dim()):
@@ -414,7 +414,7 @@ def get_sqs_statistics(x, **kwargs):
     return max_dims
 
 
-def compute_sqs_scale_tensor(max_dims):
+def compute_sqs_tensor_scale(max_dims):
     rank = len(max_dims)
     scale_tensor = max_dims[0].clone()
     for i in range(1, rank):
@@ -423,7 +423,7 @@ def compute_sqs_scale_tensor(max_dims):
     return scale_tensor
 
 
-def sqs_quant(x, shape):
+'''def sqs_quant(x, shape):
     """quantize the exp_avg_sq"""
     group_size = 128
 
@@ -463,8 +463,8 @@ def sqs_quant(x, shape):
     qx = sqs_quant_kernel(qx,qmap_variance) #  qmap, b, round_type="real-nearest")
 
     return qx, generated_metadata
-
-def sqs_quant_kernel(x,qmap_variance):
+'''
+def sqs_quant(x,shape):
     """quantize the exp_avg_sq with rank1"""
     #grouped_qx = group_tensor(qx, 2048)
     # todo next
@@ -485,15 +485,18 @@ def sqs_quant_kernel(x,qmap_variance):
         print(f"469: {qx=}")
         generated_metadata['max1'] = max1
     else:
-        assert false, "rank1 with dim >1 not supported yet"
-        max_dims = get_sm3_statistics(qx.abs())
-        st = _compute_sm3_scale_tensor(max_dims)
+
+        max_dims = get_sqs_tensor_statistics(qx.abs())
+        print(f"{max_dims=}")
+        st = compute_sqs_tensor_scale(max_dims)
+        print(f"{st=}")
         generated_metadata['max_dims'] = max_dims
         generated_metadata['max1'] = None
         qx = qx.div(st)
+        print(f"496: {qx=}")
     #generated_metadata.update(md)
 
-
+    return qx, generated_metadata
 
 
 
