@@ -1,10 +1,12 @@
-import torch
-from torch import Tensor
-from typing import Any, Dict, List, Optional
-import torch.distributed as dist
-from dataclasses import dataclass
-from .quant_opt_base import create_qmap, create_dynamic_map, create_pow_map
 import math
+from dataclasses import dataclass
+from typing import Any, Dict, List, Optional
+
+import torch
+import torch.distributed as dist
+from torch import Tensor
+
+from .quant_opt_base import create_dynamic_map, create_pow_map, create_qmap
 
 __all__ = ["AdamW_QuantFour"]
 
@@ -368,9 +370,9 @@ def _single_tensor_step(
         # quantize
         qx, gen = avgs_quant(exp_avg, shape=param.shape)
         # todo - err re: not tensor but should be tensor list
-        #q_exp_avg.data = qx
+        # q_exp_avg.data = qx
 
-        qx, gen = sqs_quant(exp_avg_sq, shape = param.shape)
+        qx, gen = sqs_quant(exp_avg_sq, shape=param.shape)
 
 
 def avgs_dequant(qx, shape):
@@ -405,7 +407,9 @@ def avgs_dequant(qx, shape):
         return x
 
 
-def get_sqs_tensor_statistics(x, ):
+def get_sqs_tensor_statistics(
+    x,
+):
     qx = x.abs()
     max_dims = []
     for i in range(x.dim()):
@@ -464,44 +468,85 @@ def compute_sqs_tensor_scale(max_dims):
 
     return qx, generated_metadata
 '''
-def sqs_quant(x,shape):
+
+
+def sqs_quant(x, shape):
     """quantize the exp_avg_sq with rank1"""
-    #grouped_qx = group_tensor(qx, 2048)
+    # grouped_qx = group_tensor(qx, 2048)
     # todo next
-    qx = x.detach() # keep the reference of original tensor
+    qx = x.detach()  # keep the reference of original tensor
 
     # save kwargs
     generated_metadata = {}
-    generated_metadata['dtype'] = x.dtype
-    generated_metadata['stride'] = x.stride()
+    generated_metadata["dtype"] = x.dtype
+    generated_metadata["stride"] = x.stride()
 
-
-    generated_metadata['dim'] = qx.dim()
-    if qx.dim() == 1: # group
+    generated_metadata["dim"] = qx.dim()
+    if qx.dim() == 1:  # group
         group_size = 128
         qx = group_tensor(qx, group_size)
         max1 = max_reduce_except_dim(qx.abs(), 0)
         qx = qx.div(max1)
         print(f"469: {qx=}")
-        generated_metadata['max1'] = max1
+        generated_metadata["max1"] = max1
     else:
 
         max_dims = get_sqs_tensor_statistics(qx.abs())
         print(f"{max_dims=}")
         st = compute_sqs_tensor_scale(max_dims)
         print(f"{st=}")
-        generated_metadata['max_dims'] = max_dims
-        generated_metadata['max1'] = None
+        generated_metadata["max_dims"] = max_dims
+        generated_metadata["max1"] = None
         qx = qx.div(st)
         print(f"496: {qx=}")
-    #generated_metadata.update(md)
+    # generated_metadata.update(md)
 
+    # qx = nonlinear_quant(qx, qmap, b, round_type=kwargs['round_type'])
+    qmap_variance = torch.tensor(
+        [
+            0.0625,
+            0.1250,
+            0.1875,
+            0.2500,
+            0.3125,
+            0.3750,
+            0.4375,
+            0.5000,
+            0.5625,
+            0.6250,
+            0.6875,
+            0.7500,
+            0.8125,
+            0.8750,
+            0.9375,
+            1.0000,
+        ]
+    )
+
+    variance_midpoint_lut = torch.tensor(
+        [
+            0.09375,
+            0.15625,
+            0.21875,
+            0.28125,
+            0.34375,
+            0.40625,
+            0.46875,
+            0.53125,
+            0.59375,
+            0.65625,
+            0.71875,
+            0.78125,
+            0.84375,
+            0.90625,
+            0.96875,
+        ]
+    )
+
+    print(f"*before* quant sqs {qx.shape=}, {qx=}")
+    qx = kernel_quant_nonlinear(qx, qmap_variance, variance_midpoint_lut, debug=True)
+    print(f"*after* quant sqs {qx.shape=}, {qx=}")
     return qx, generated_metadata
-
-
-
-
-
 
 
 def nonlinear_quant(x, qmap, b, round_type="real-nearest"):
@@ -546,25 +591,31 @@ def avgs_quant(x, shape):
             0.6625,
             0.8875,
             1.0000,
-        ], dtype=torch.float32, device='cuda'
+        ],
+        dtype=torch.float32,
+        device="cuda",
     )
-    midpoint_lut = torch.tensor([
-        -0.775,
-        -0.55,
-        -0.325,
-        -0.145,
-        -0.055,
-        -0.019,
-        -0.00275,
-        0.00275,
-        0.019,
-        0.055,
-        0.145,
-        0.325,
-        0.55,
-        0.775,
-        0.94375,
-    ], dtype=torch.float32, device='cuda')
+    midpoint_lut = torch.tensor(
+        [
+            -0.775,
+            -0.55,
+            -0.325,
+            -0.145,
+            -0.055,
+            -0.019,
+            -0.00275,
+            0.00275,
+            0.019,
+            0.055,
+            0.145,
+            0.325,
+            0.55,
+            0.775,
+            0.94375,
+        ],
+        dtype=torch.float32,
+        device="cuda",
+    )
 
     qx = x.detach()
     print(f"445: {qx=}")
@@ -590,7 +641,7 @@ def avgs_quant(x, shape):
     # quantize
     grouped_qx = group_tensor(qx, 2048)
     # qx = cuda_kernel_pack_nonlinear(grouped_qx)
-    qx = momentum_quant_nonlinear(grouped_qx, qmap, midpoint_lut)
+    qx = kernel_quant_nonlinear(grouped_qx, qmap, midpoint_lut)
     # let's do this in place for now
     print(f"461: {grouped_qx=}")
     print(f"{grouped_qx.shape=}")
@@ -598,30 +649,36 @@ def avgs_quant(x, shape):
     return qx, meta
 
 
-def momentum_quant_nonlinear(
-    x,qmap, midpoint_lut,
+def kernel_quant_nonlinear(
+    x,
+    qmap,
+    midpoint_lut,
+    debug=False,
 ):
     """quantize the exp_avg"""
 
-
-    print(f"479: quant func received {x.shape=}, \n {x=}")
+    if debug:
+        print(f"670: quant func received {x.shape=}, \n {x=}")
     bits = 4
     # kernel
     num_groups = x.data.size(0)
     group_size = x.data.size(1)
-    print(f"483: {num_groups=}, {group_size=}")
+    if debug:
+        print(f"665: {num_groups=}, {group_size=}")
 
     # // Compute total bits
     work_per_int = 8 / bits
     workint_per_thread = 4
     work_per_thread = work_per_int * workint_per_thread
     assert 8 % bits == 0
-    assert group_size % work_per_thread == 0
+    #assert group_size % work_per_thread == 0
 
     total_bits = bits * (num_groups * group_size)
-    print(f"488: {total_bits=}")
+    if debug:
+        print(f"675: {total_bits=}")
     packed_size = int((total_bits + 8) / 8)
-    print(f"490: {packed_size=}")
+    if debug:
+        print(f"677: {packed_size=}")
     packed = torch.zeros((packed_size,), dtype=torch.uint8, device=x.device)
     # Tensor packed = torch::empty({(total_bits + 8) / 8,}, options);
     # print(f"493: {packed.shape=}")
@@ -660,21 +717,25 @@ __global__ void pack_nonlinear_4bit_kernel(int32_t bits,
     """
 
     for index in range(len(x[0])):
-        print(f"{index=}, {x[0][index]=}")
+        if debug:
+            print(f"{index=}, {x[0][index]=}")
         val = x[0][index].item()
-        print(f"{val=}")
+        if debug:
+            print(f"{val=}")
         if val == 0:
             break
         qitem = bsearch(val, qmap, midpoint_lut)
-        print(f"544: {qitem=}, {val=}")
+        if debug:
+            print(f"729: {qitem=}, {val=}")
         packed[index] = qitem
-    print(f"\n")
-    print(f"{x[0][0:10]=}\n{packed[0:10]=}\n ")
-    print(f"========================")
+    if debug:
+        print(f"\n")
+        print(f"{x[0][0:10]=}\n{packed[0:10]=}\n ")
+        print(f"========================")
 
     # todo mask = (1 << bits) - 1
     # print(f"552: {mask=}")
-    return qitem
+    return packed
 
 
 def bsearch(x, qmap, midpoint_lut):
@@ -695,15 +756,15 @@ def bsearch(x, qmap, midpoint_lut):
             low = mid + 1
 
     rank = 0
-    #mid_val = (qmap[low - 1] + qmap[low]) * 0.5
-    mid_val = midpoint_lut[low-1]
-    #assert torch.allclose(mid_val, lut_val)# , f"{mid_val=}, {lut_val=}"
+    # mid_val = (qmap[low - 1] + qmap[low]) * 0.5
+    mid_val = midpoint_lut[low - 1]
+    # assert torch.allclose(mid_val, lut_val)# , f"{mid_val=}, {lut_val=}"
 
     if mid_val < x:
         rank = low
     else:
         rank = low - 1
-    print(f"564: {x=}, {low=}, {mid_val=}, {qmap[rank]=},")
+    print(f"767: {x=}, {low=}, {mid_val=}, {qmap[rank]=},")
     return rank
     """
     int lo = 0;
