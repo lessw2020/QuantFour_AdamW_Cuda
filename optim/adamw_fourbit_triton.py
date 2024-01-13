@@ -5,11 +5,13 @@ from typing import Any, Dict, List, Optional
 import torch
 import torch.distributed as dist
 from torch import Tensor
-
+import sys
 from .quant_opt_base import create_dynamic_map, create_pow_map, create_qmap
 
 __all__ = ["AdamW_QuantFour"]
 
+def lprint(msg=""):
+  print(f"Debug {sys._getframe().f_back.f_lineno}: {msg}")
 
 @dataclass
 class QuantParams:
@@ -147,7 +149,7 @@ class AdamW_QuantFour(torch.optim.Optimizer):
 
     def init_qstate(self, p, state_name):
         state = self.state[p]
-        # print(f"{state=}")
+        # lprint(f"{state=}")
         field = f"{state_name}_qstate"
         state[field] = {
             "enable": True,
@@ -158,16 +160,16 @@ class AdamW_QuantFour(torch.optim.Optimizer):
         state[field]["enable"] = _get_qenable_fn(p, subconfig.threshold)
 
         md = self.get_qmetadata_by_state_name(state_name)
-        # print(f"{md=}")
+        # lprint(f"{md=}")
         qmap_key = (md["quant_type"], md["b"], md["signed"])
-        # print(f"{qmap_key=}")
+        # lprint(f"{qmap_key=}")
 
         if qmap_key not in self.qmaps:
             self.qmaps[qmap_key] = create_qmap(*qmap_key)
-            print(f"created qmap = {self.qmaps[qmap_key]=}")
+            lprint(f"created qmap = {self.qmaps[qmap_key]=}")
         # self.qmaps[qmap_key] = self.qmaps[qmap_key].to(p.device)
         state[field]["qmap"] = self.qmaps[qmap_key]
-        # print(f"completing state for {state_name=}, with {state=}")
+        # lprint(f"completing state for {state_name=}, with {state=}")
 
     def create_qmap(quant_type, bit, signed):
         """create qmap for quantization"""
@@ -212,8 +214,8 @@ class AdamW_QuantFour(torch.optim.Optimizer):
         exp_avgs_qmap,
         exp_avgs_sqs_qmap,
     ):
-        # print(f"{exp_avgs_qmap=}")
-        # print(f"{exp_avgs_sqs_qmap=}")
+        # lprint(f"{exp_avgs_qmap=}")
+        # lprint(f"{exp_avgs_sqs_qmap=}")
         for p in group["params"]:
             if p.grad is None:
                 continue
@@ -309,11 +311,11 @@ def _single_tensor_step(
     weight_decay: float,
     eps: float,
 ):
-    # print(f"273: In Step function")
-    # print(f" len params with grad {len(params_with_grad)}, len grads {len(grads)}, len exp_avgs {len(exp_avgs)}, len exp_avg_sqs    {len(exp_avg_sqs)}, len state_steps {len(state_steps)}")
+    # lprint(f" In Step function")
+    # lprint(f" len params with grad {len(params_with_grad)}, len grads {len(grads)}, len exp_avgs {len(exp_avgs)}, len exp_avg_sqs    {len(exp_avg_sqs)}, len state_steps {len(state_steps)}")
     for i, param in enumerate(params_with_grad):
-        # print(f"step loop {i}, {param[0]=}")
-        # print(f"++++++++++++++++++++++++")
+        # lprint(f"step loop {i}, {param[0]=}")
+        # lprint(f"++++++++++++++++++++++++")
         grad = grads[i]
         q_exp_avg = exp_avgs[i]
         q_exp_avg_sq = exp_avg_sqs[i]
@@ -328,7 +330,7 @@ def _single_tensor_step(
         q_enabled = True  # todo
         sq_enabled = True
 
-        # print(f"288: {step_t=}, and {q_exp_avg=}")
+        # lprint(f"288: {step_t=}, and {q_exp_avg=}")
         if q_exp_avg.numel() < 2:
             q_exp_avg.data = exp_avg = torch.zeros_like(
                 param, memory_format=torch.preserve_format
@@ -361,11 +363,11 @@ def _single_tensor_step(
         bias_corr2_sqrt = math.sqrt(bias_corr2)
 
         denom = (exp_avg_sq.sqrt() / bias_corr2_sqrt).add_(eps)
-        # print(f"321: {denom=}")
+        # lprint(f"321: {denom=}")
         # weight update
-        # print(f"323: {param=}")
+        # lprint(f"323: {param=}")
         param.addcdiv_(exp_avg, denom, value=-step_size)
-        # print(f"325: after add cdiv {param=}")
+        # lprint(f"325: after add cdiv {param=}")
 
         # quantize
         qx, gen = avgs_quant(exp_avg, shape=param.shape)
@@ -487,18 +489,18 @@ def sqs_quant(x, shape):
         qx = group_tensor(qx, group_size)
         max1 = max_reduce_except_dim(qx.abs(), 0)
         qx = qx.div(max1)
-        print(f"469: {qx=}")
+        lprint(f"{qx=}")
         generated_metadata["max1"] = max1
     else:
 
         max_dims = get_sqs_tensor_statistics(qx.abs())
-        print(f"{max_dims=}")
+        lprint(f"{max_dims=}")
         st = compute_sqs_tensor_scale(max_dims)
-        print(f"{st=}")
+        lprint(f"{st=}")
         generated_metadata["max_dims"] = max_dims
         generated_metadata["max1"] = None
         qx = qx.div(st)
-        print(f"496: {qx=}")
+        lprint(f" {qx=}")
     # generated_metadata.update(md)
 
     # qx = nonlinear_quant(qx, qmap, b, round_type=kwargs['round_type'])
@@ -543,9 +545,9 @@ def sqs_quant(x, shape):
         ]
     )
 
-    print(f"*before* quant sqs {qx.shape=}, {qx=}")
+    lprint(f"*before* quant sqs {qx.shape=}, {qx=}")
     qx = kernel_quant_nonlinear(qx, qmap_variance, variance_midpoint_lut, debug=True)
-    print(f"*after* quant sqs {qx.shape=}, {qx=}")
+    lprint(f"*after* quant sqs {qx.shape=}, {qx=}")
     return qx, generated_metadata
 
 
@@ -618,8 +620,8 @@ def avgs_quant(x, shape):
     )
 
     qx = x.detach()
-    print(f"445: {qx=}")
-    print(f"{qx.shape=}")
+    lprint(f"{qx=}")
+    lprint(f"{qx.shape=}")
 
     meta = {}
     meta["dtype"] = x.dtype
@@ -627,15 +629,15 @@ def avgs_quant(x, shape):
 
     # quant scaling for exp_avgs
     qx = group_tensor(x, group_size)
-    print(f"453: qx after group {qx=}")
-    print(f"{qx.shape=}\n+++++++++++++++++")
+    lprint(f"qx after group {qx=}")
+    lprint(f"{qx.shape=}\n+++++++++++++++++")
 
     max_per_row = max_reduce_except_dim(qx.abs(), 0)
-    print(f"458: {max_per_row=}")
+    lprint(f"{max_per_row=}")
     qx = qx.div(max_per_row)
-    print(f"460: {qx=}")
+    lprint(f"{qx=}")
     scaled_shape = qx.shape
-    print(f"462: {scaled_shape=}")
+    lprint(f"{scaled_shape=}")
 
     # metadata = max_per_row, scaled_shape
     # quantize
@@ -643,8 +645,8 @@ def avgs_quant(x, shape):
     # qx = cuda_kernel_pack_nonlinear(grouped_qx)
     qx = kernel_quant_nonlinear(grouped_qx, qmap, midpoint_lut)
     # let's do this in place for now
-    print(f"461: {grouped_qx=}")
-    print(f"{grouped_qx.shape=}")
+    lprint(f"{grouped_qx=}")
+    lprint(f"{grouped_qx.shape=}")
 
     return qx, meta
 
@@ -658,13 +660,13 @@ def kernel_quant_nonlinear(
     """quantize the exp_avg"""
 
     if debug:
-        print(f"670: quant func received {x.shape=}, \n {x=}")
+        lprint(f"quant func received {x.shape=}, \n {x=}")
     bits = 4
     # kernel
     num_groups = x.data.size(0)
     group_size = x.data.size(1)
     if debug:
-        print(f"665: {num_groups=}, {group_size=}")
+        lprint(f"{num_groups=}, {group_size=}")
 
     # // Compute total bits
     work_per_int = 8 / bits
@@ -675,13 +677,13 @@ def kernel_quant_nonlinear(
 
     total_bits = bits * (num_groups * group_size)
     if debug:
-        print(f"675: {total_bits=}")
+        lprint(f"{total_bits=}")
     packed_size = int((total_bits + 8) / 8)
     if debug:
-        print(f"677: {packed_size=}")
+        lprint(f"{packed_size=}")
     packed = torch.zeros((packed_size,), dtype=torch.uint8, device=x.device)
     # Tensor packed = torch::empty({(total_bits + 8) / 8,}, options);
-    # print(f"493: {packed.shape=}")
+    # lprint(f"{packed.shape=}")
 
     """// Pack float16/32 data into int8 bit stream, for bits < 8 and 8 % bit == 0
 template<typename scalar_t, bool STOCHASTIC>
@@ -718,23 +720,23 @@ __global__ void pack_nonlinear_4bit_kernel(int32_t bits,
 
     for index in range(len(x[0])):
         if debug:
-            print(f"{index=}, {x[0][index]=}")
+            lprint(f"{index=}, {x[0][index]=}")
         val = x[0][index].item()
         if debug:
-            print(f"{val=}")
+            lprint(f"{val=}")
         if val == 0:
             break
         qitem = bsearch(val, qmap, midpoint_lut)
         if debug:
-            print(f"729: {qitem=}, {val=}")
+            lprint(f"{qitem=}, {val=}")
         packed[index] = qitem
     if debug:
-        print(f"\n")
-        print(f"{x[0][0:10]=}\n{packed[0:10]=}\n ")
-        print(f"========================")
+        lprint(f"\n")
+        lprint(f"{x[0][0:10]=}\n{packed[0:10]=}\n ")
+        lprint(f"========================")
 
     # todo mask = (1 << bits) - 1
-    # print(f"552: {mask=}")
+    # lprint(f"552: {mask=}")
     return packed
 
 
@@ -742,7 +744,7 @@ def bsearch(x, qmap, midpoint_lut):
     """ """
     low = 0
     high = 16
-    print(f"546: {qmap[0]=}, {qmap[15]=}, {x=}")
+    lprint(f"{qmap[0]=}, {qmap[15]=}, {x=}")
     if x <= qmap[0]:
         return low
     if x >= qmap[15]:
@@ -764,7 +766,7 @@ def bsearch(x, qmap, midpoint_lut):
         rank = low
     else:
         rank = low - 1
-    print(f"767: {x=}, {low=}, {mid_val=}, {qmap[rank]=},")
+    lprint(f"{x=}, {low=}, {mid_val=}, {qmap[rank]=},")
     return rank
     """
     int lo = 0;
