@@ -11,7 +11,28 @@ from .quant_opt_base import create_dynamic_map, create_pow_map, create_qmap
 __all__ = ["AdamW_QuantFour"]
 
 def lprint(msg=""):
-  print(f"Debug {sys._getframe().f_back.f_lineno}: {msg}")
+  print(f"Debug ++> {sys._getframe().f_back.f_lineno}: {msg}")
+
+_momentum_qmap = torch.tensor(
+            [
+                -0.8875,
+                -0.6625,
+                -0.4375,
+                -0.2125,
+                -0.0775,
+                -0.0325,
+                -0.0055,
+                0.0000,
+                0.0055,
+                0.0325,
+                0.0775,
+                0.2125,
+                0.4375,
+                0.6625,
+                0.8875,
+                1.0000,
+            ]
+        )
 
 @dataclass
 class QuantParams:
@@ -374,7 +395,7 @@ def _single_tensor_step(
         # quantize
         qx, gen = avgs_quant(exp_avg, shape=param.shape)
         # todo - err re: not tensor but should be tensor list
-        # q_exp_avg.data = qx
+        q_exp_avg.data = qx
 
         qx, gen = sqs_quant(exp_avg_sq, shape=param.shape)
 
@@ -383,13 +404,16 @@ def avgs_dequant(qx, shape):
     """dequantize the exp_avg"""
     x = qx.detach()
     b, signed = 4, True
-    if isinstance(kwargs["qmap"], torch.Tensor):
+    '''if isinstance(kwargs["qmap"], torch.Tensor):
         qmap = kwargs["qmap"]
     else:
         qmap = kwargs["qmap"][(b, signed)][quant_type]
+    '''
     # x = nonlinear_dequant(x, qmap, b, shape=kwargs['scaled_shape'], )
     num_groups = (shape.numel() + 2047) // 2048
-    grouped_x = ext_quantization.unpack_nonlinear(qx, qmap, b, num_groups, 2048)
+    grouped_x = avgs_dequant_nonlinear(x, _momentum_qmap, num_groups, 2048)
+    assert False, 'good stop'
+    # grouped_x = ext_quantization.unpack_nonlinear(qx, qmap, b, num_groups, 2048)
     x = recon_grouped_tensor(grouped_x, shape)
 
     x = x.mul(max1)
@@ -409,6 +433,19 @@ def avgs_dequant(qx, shape):
     else:
         x = x.to(dtype=dtype)
         return x
+
+def avgs_dequant_nonlinear(x, qmap, num_groups, size = 2048):
+    """dequantize the exp_avg"""
+    lprint(f"{x=}")
+    lprint(f"{qmap=}")
+    lprint(f"{num_groups=}")
+    lprint(f"{size=}")
+    lprint(f"{x.shape=}")
+    lprint(f"{x.stride()=}")
+    lprint(f"{x.dtype=}")
+
+
+
 
 
 def get_sqs_tensor_statistics(
