@@ -43,7 +43,7 @@ class TestAdamw4Bit_Optimizer:
             assert_expected(p1, p2)
         print(f"len model {len(model_orig_params)}")
 
-        for i in range(1):
+        for i in range(2):
             adam_opt.zero_grad(set_to_none=True)
             fourbit_adamw_opt.zero_grad(set_to_none=True)
             inp = torch.randn(5, 5, device=next(model.parameters()).device)

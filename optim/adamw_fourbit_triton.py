@@ -320,7 +320,7 @@ def _single_tensor_step(
         q_exp_avg = exp_avgs[i]
         q_exp_avg_sq = exp_avg_sqs[i]
         step_t = state_steps[i]
-
+        lprint(f"{step_t=}")
         step_t += 1
 
         # decoupled weight decay
@@ -331,11 +331,13 @@ def _single_tensor_step(
         sq_enabled = True
 
         # lprint(f"288: {step_t=}, and {q_exp_avg=}")
+        lprint(f"at dequant, {step_t=}, {q_exp_avg=}")
         if q_exp_avg.numel() < 2:
             q_exp_avg.data = exp_avg = torch.zeros_like(
                 param, memory_format=torch.preserve_format
             )
         else:
+            lprint(f"at dequant for momentum, {q_exp_avg=}")
             exp_avg = avgs_dequant(q_exp_avg, shape=param.shape)
 
         if q_exp_avg_sq.numel() < 2:
