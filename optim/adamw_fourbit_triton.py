@@ -425,6 +425,7 @@ def avgs_dequant(qx, shape, overhead):
     """dequantize the exp_avg"""
     x = qx.detach()
     b, signed = 4, True
+    lprint(f"avgs dequant {x=}, {shape=}, {overhead=}")
 
     # x = nonlinear_dequant(x, qmap, b, shape=kwargs['scaled_shape'], )
     num_groups = (shape.numel() + 127) // 128
@@ -432,9 +433,11 @@ def avgs_dequant(qx, shape, overhead):
 
     # grouped_x = ext_quantization.unpack_nonlinear(qx, qmap, b, num_groups, 2048)
     x = rebuild_grouped_tensor(grouped_x, shape)
-
+    lprint(f"premul {x=}, {x.shape=}")
     x = x.mul(overhead['max1'])
-    shape = overhead["shape"]
+    lprint(f"postmul {x=}, {x.shape=}")
+
+    # shape = overhead["shape"]
 
     # reconstruct grouped tensor
     numel = shape.numel()
@@ -456,21 +459,43 @@ def rebuild_grouped_tensor(grouped_tensor, shape):
     rebuild_flatten = grouped_tensor.flatten()[:numel]
     rebuilt = rebuild_flatten.view(shape)
 
-    new_size = (1,)*len(shape) + shape
-    rebuilt2 = grouped_tensor.contiguous().view(*new_size).clone()
-    lprint(f"{rebuilt=}, {rebuilt2=}")
-    assert torch.allclose(rebuilt, rebuilt2)
+    #new_size = (1,)*len(shape) + shape
+    #rebuilt2 = grouped_tensor.contiguous().view(*new_size).clone()
+    #lprint(f"{rebuilt=}, {rebuilt2=}")
+    #assert torch.allclose(rebuilt, rebuilt2)
+    lprint(f"{rebuilt=}, {rebuilt.shape=}, {shape=}")
     return rebuilt
 
 def avgs_dequant_kernel(x, qmap, num_groups, size = 2048):
     """dequantize the exp_avg"""
-    lprint(f"{x=}")
+    lprint(f"{x=}, {x.shape=},") # {x.stride()=}, {x.dtype=}")
     lprint(f"{qmap=}")
     lprint(f"{num_groups=}")
     lprint(f"{size=}")
     lprint(f"{x.shape=}")
     lprint(f"{x.stride()=}")
     lprint(f"{x.dtype=}")
+
+    # Tensor unpacked = torch::empty({num_groups, group_size}, options);
+    unpacked = torch.zeros((num_groups, 128), dtype=torch.float, device=x.device)
+    lprint(f"{unpacked.shape=}")
+
+
+    for i, val in enumerate(x):
+        if i > 127:
+            break
+
+        #dequant_val = qmap[val.item()]
+        #lprint(f"{val=}, {dequant_val.item()=}")
+
+        unpacked[0][i] = qmap[val] # qmap[val.item()]
+        lprint(f"check {unpacked[0][i]=}, {qmap[val]=}, {val=}")
+
+    lprint(f"{unpacked=}")
+    #assert False, 'stop'
+    return unpacked
+
+
 
 
 
@@ -738,7 +763,7 @@ def kernel_quant_nonlinear(
     packed_size = int((total_bits + 8) / 8)
     if debug:
         lprint(f"{packed_size=}")
-    packed = torch.zeros((packed_size,), dtype=torch.uint8, device=x.device)
+    packed = torch.zeros((packed_size,), dtype=torch.int8, device=x.device)
     # Tensor packed = torch::empty({(total_bits + 8) / 8,}, options);
     # lprint(f"{packed.shape=}")
 
