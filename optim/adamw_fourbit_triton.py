@@ -441,7 +441,7 @@ def avgs_dequant(qx, shape, overhead):
 
     # reconstruct grouped tensor
     numel = shape.numel()
-    recon_flatten = grouped_tensor.flatten()[:numel]
+    recon_flatten = grouped_x.flatten()[:numel]
     recon = recon_flatten.view(shape)
     if x.stride() != stride:
         recon_x = torch.empty_strided(
