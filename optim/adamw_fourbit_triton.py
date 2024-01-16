@@ -34,6 +34,26 @@ _momentum_qmap = torch.tensor(
             ]
         )
 
+_sqs_qmap = torch.tensor(
+            [
+                0.0625,
+                0.1250,
+                0.1875,
+                0.2500,
+                0.3125,
+                0.3750,
+                0.4375,
+                0.5000,
+                0.5625,
+                0.6250,
+                0.6875,
+                0.7500,
+                0.8125,
+                0.8750,
+                0.9375,
+                1.0000,
+            ]
+        )
 @dataclass
 class QuantParams:
     bits: int
@@ -428,24 +448,26 @@ def sqs_dequant(qx, shape, overhead):
     dtype = overhead['dtype']
     stride = overhead['stride']
     max1 = overhead['max1']
+    dim = overhead['dim']
     #shape1 = overhead['shape']
     #scaled_shape = overhead['scaled_shape']
-    assert False, 'good'
+    # todo - need to store shapes in overhead!
 
     # kernel dequant
-    x = sqs_dequant_kernel(x, _sqs_qmap, shape1,)
+    x = sqs_dequant_kernel(x, _sqs_qmap, shape,)
 
     # rank1 scaling
-    dim = metadata['dim']
+
     if dim == 1: # group
         x = x.mul(max1)
-        shape = shape1 # kwargs['shape']
+        #shape = shape1 # kwargs['shape']
         x = rebuild_grouped_tensor(x, shape)
     else:
-        max_dims = metadata['max_dims']
+        max_dims = overhead['max_dims']
+        lprint(f"{max_dims=}")
         st = _compute_sm3_scale_tensor(max_dims)
         x = x.mul(st)
-
+    assert False, 'good'
 
 
 
@@ -521,13 +543,35 @@ def avgs_dequant_kernel(x, qmap, num_groups, size = 2048):
         #lprint(f"{val=}, {dequant_val.item()=}")
 
         unpacked[0][i] = qmap[val] # qmap[val.item()]
-        lprint(f"check {unpacked[0][i]=}, {qmap[val]=}, {val=}")
+        #lprint(f"check {unpacked[0][i]=}, {qmap[val]=}, {val=}")
 
     lprint(f"{unpacked=}")
     #assert False, 'stop'
     return unpacked
 
+def sqs_dequant_kernel(x, qmap, shape):
+    """dequantize the exp_avg"""
 
+
+    # Tensor unpacked = torch::empty({num_groups, group_size}, options);
+    unpacked = torch.zeros((x.shape), dtype=torch.float, device=x.device)
+    lprint(f"sqs dequant {unpacked.shape=}")
+    lprint(f"sqs dequant {x.shape=}")
+
+    for i, val in enumerate(x):
+        #if i > 9:
+        #    break
+
+        #dequant_val = qmap[val.item()]
+        #lprint(f"{val=}, {dequant_val.item()=}")
+
+        unpacked[i] = qmap[val] # qmap[val.item()]
+        lprint(f"check {unpacked[i]=}, {qmap[val]=}, {val=}")
+
+    lprint(f"sqs dequant kernel {unpacked=}")
+    assert False, 'stop'
+
+    return unpacked
 
 
 
