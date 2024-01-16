@@ -364,7 +364,12 @@ def _single_tensor_step(
             )
         else:
             lprint(f"at dequant for momentum, {q_exp_avg=}")
-            exp_avg = avgs_dequant(q_exp_avg, shape=param.shape)
+            lprint(f"{exp_avg_q_overhead=}")
+
+            exp_avg = avgs_dequant(q_exp_avg, shape=param.shape, overhead=exp_avg_q_overhead )
+            exp_avg_q_overhead.clear()
+            #lprint(f"{exp_avg_q_overhead=}")
+            #assert False, 'good'
 
         if q_exp_avg_sq.numel() < 2:
             q_exp_avg_sq.data = exp_avg_sq = torch.zeros_like(
@@ -416,24 +421,20 @@ def sqs_dequant(qx, shape):
     x = nonlinear_dequant(x, qmap,) #  b, shape=kwargs['scaled_shape'], round_type=kwargs['round_type'])
 
 
-def avgs_dequant(qx, shape):
+def avgs_dequant(qx, shape, overhead):
     """dequantize the exp_avg"""
     x = qx.detach()
     b, signed = 4, True
-    '''if isinstance(kwargs["qmap"], torch.Tensor):
-        qmap = kwargs["qmap"]
-    else:
-        qmap = kwargs["qmap"][(b, signed)][quant_type]
-    '''
+
     # x = nonlinear_dequant(x, qmap, b, shape=kwargs['scaled_shape'], )
-    num_groups = (shape.numel() + 2047) // 2048
-    grouped_x = avgs_dequant_nonlinear(x, _momentum_qmap, num_groups, 2048)
+    num_groups = (shape.numel() + 127) // 128
+    grouped_x = avgs_dequant_kernel(x, _momentum_qmap, num_groups, 128)
 
     # grouped_x = ext_quantization.unpack_nonlinear(qx, qmap, b, num_groups, 2048)
-    x = recon_grouped_tensor(grouped_x, shape)
+    x = rebuild_grouped_tensor(grouped_x, shape)
 
-    x = x.mul(max1)
-    shape = kwargs["shape"]
+    x = x.mul(overhead['max1'])
+    shape = overhead["shape"]
 
     # reconstruct grouped tensor
     numel = shape.numel()
@@ -450,7 +451,18 @@ def avgs_dequant(qx, shape):
         x = x.to(dtype=dtype)
         return x
 
-def avgs_dequant_nonlinear(x, qmap, num_groups, size = 2048):
+def rebuild_grouped_tensor(grouped_tensor, shape):
+    numel = shape.numel()
+    rebuild_flatten = grouped_tensor.flatten()[:numel]
+    rebuilt = rebuild_flatten.view(shape)
+
+    new_size = (1,)*len(shape) + shape
+    rebuilt2 = grouped_tensor.contiguous().view(*new_size).clone()
+    lprint(f"{rebuilt=}, {rebuilt2=}")
+    assert torch.allclose(rebuilt, rebuilt2)
+    return rebuilt
+
+def avgs_dequant_kernel(x, qmap, num_groups, size = 2048):
     """dequantize the exp_avg"""
     lprint(f"{x=}")
     lprint(f"{qmap=}")
