@@ -172,6 +172,7 @@ class AdamW_QuantFour(torch.optim.Optimizer):
         state = self.state[p]
         # lprint(f"{state=}")
         field = f"{state_name}_qstate"
+        lprint(f"{field=}")
         state[field] = {
             "enable": True,
             "overhead": dict(),
@@ -232,11 +233,10 @@ class AdamW_QuantFour(torch.optim.Optimizer):
         exp_avgs,
         exp_avgs_sqs,
         state_steps,
-        exp_avgs_qmap,
-        exp_avgs_sqs_qmap,
+        momentum_meta,
+        variance_meta,
     ):
-        # lprint(f"{exp_avgs_qmap=}")
-        # lprint(f"{exp_avgs_sqs_qmap=}")
+
         for p in group["params"]:
             if p.grad is None:
                 continue
@@ -262,6 +262,9 @@ class AdamW_QuantFour(torch.optim.Optimizer):
             exp_avgs.append(state["exp_avg"])
             exp_avgs_sqs.append(state["exp_avg_sq"])
 
+            momentum_meta.append(state["momentum_qstate"]["overhead"])
+            variance_meta.append(state["variance_qstate"]["overhead"])
+
             # exp_avgs_q_enabled.append(self.override_q_enable[id(p)] if id(p) in self.override_q_enable else state["exp_avg_qstate"]["enable"])
             # exp_avg_sqs_q_enabled.append(self.override_q_enable[id(p)] if id(p) in self.override_q_enable else state["exp_avg_sq_qstate"]["enable"])
             # exp_avgs_q_overhead.append(state["exp_avg_qstate"]["overhead"])
@@ -285,8 +288,8 @@ class AdamW_QuantFour(torch.optim.Optimizer):
             exp_avg_sqs = []
             state_steps = []
             beta1, beta2 = group["betas"]
-            exp_avgs_qmap = []
-            exp_avg_sqs_qmap = []
+            momentum_meta = []
+            variance_meta = []
 
             self._init_group(
                 group,
@@ -295,8 +298,8 @@ class AdamW_QuantFour(torch.optim.Optimizer):
                 exp_avgs,
                 exp_avg_sqs,
                 state_steps,
-                exp_avgs_qmap,
-                exp_avg_sqs_qmap,
+                momentum_meta,
+                variance_meta,
             )
 
             kwargs = dict(
@@ -305,13 +308,13 @@ class AdamW_QuantFour(torch.optim.Optimizer):
                 exp_avgs=exp_avgs,
                 exp_avg_sqs=exp_avg_sqs,
                 state_steps=state_steps,
-                exp_avgs_qmap=exp_avgs_qmap,
-                exp_avg_sqs_qmap=exp_avg_sqs_qmap,
                 beta1=beta1,
                 beta2=beta2,
                 lr=group["lr"],
                 weight_decay=group["weight_decay"],
                 eps=group["eps"],
+                momentum_meta = momentum_meta,
+                variance_meta = variance_meta,
             )
 
             _single_tensor_step(**kwargs)
@@ -323,8 +326,8 @@ def _single_tensor_step(
     exp_avgs: List[Tensor],
     exp_avg_sqs: List[Tensor],
     state_steps: List[Tensor],
-    exp_avgs_qmap: List,
-    exp_avg_sqs_qmap: List,
+    momentum_meta: List,
+    variance_meta: List,
     *,
     beta1: float,
     beta2: float,
@@ -341,6 +344,8 @@ def _single_tensor_step(
         q_exp_avg = exp_avgs[i]
         q_exp_avg_sq = exp_avg_sqs[i]
         step_t = state_steps[i]
+        exp_avg_q_overhead = momentum_meta[i]
+        exp_avg_sq_q_overhead = variance_meta[i]
         lprint(f"{step_t=}")
         step_t += 1
 
@@ -393,11 +398,22 @@ def _single_tensor_step(
         # lprint(f"325: after add cdiv {param=}")
 
         # quantize
-        qx, gen = avgs_quant(exp_avg, shape=param.shape)
+        qx, gen_meta = avgs_quant(exp_avg, shape=param.shape)
         # todo - err re: not tensor but should be tensor list
         q_exp_avg.data = qx
+        exp_avg_q_overhead.update(gen_meta)
+        lprint(f"{exp_avg_q_overhead=}")
+
 
         qx, gen = sqs_quant(exp_avg_sq, shape=param.shape)
+        q_exp_avg_sq.data = qx
+
+def sqs_dequant(qx, shape):
+    """dequantize the variance"""
+    x = qx.detach()
+    b, signed = 4, False
+
+    x = nonlinear_dequant(x, qmap,) #  b, shape=kwargs['scaled_shape'], round_type=kwargs['round_type'])
 
 
 def avgs_dequant(qx, shape):
@@ -412,7 +428,7 @@ def avgs_dequant(qx, shape):
     # x = nonlinear_dequant(x, qmap, b, shape=kwargs['scaled_shape'], )
     num_groups = (shape.numel() + 2047) // 2048
     grouped_x = avgs_dequant_nonlinear(x, _momentum_qmap, num_groups, 2048)
-    assert False, 'good stop'
+
     # grouped_x = ext_quantization.unpack_nonlinear(qx, qmap, b, num_groups, 2048)
     x = recon_grouped_tensor(grouped_x, shape)
 
@@ -590,16 +606,6 @@ def sqs_quant(x, shape):
     return qx, generated_metadata
 
 
-def nonlinear_quant(x, qmap, b, round_type="real-nearest"):
-    """quantize the exp_avg_sq"""
-
-    def real_nonlinear_quant(qx, qmap, b, stochastic):
-        # kernel
-        grouped_qx = group_tensor(qx, 2048)
-        return ext_quantization.pack_nonlinear(grouped_qx, qmap, b, stochastic)
-
-    idx = real_nonlinear_quant(qx, qmap, b, False)
-    return idx
 
 
 def nonlinear_de_quant(qx, qmap, b, shape, round_type="real-nearest"):
@@ -662,32 +668,32 @@ def avgs_quant(x, shape):
     lprint(f"{qx=}")
     lprint(f"{qx.shape=}")
 
-    meta = {}
-    meta["dtype"] = x.dtype
-    meta["stride"] = x.stride()
+    gen_meta = {} # save all meta data for dequantization
+    gen_meta["dtype"] = x.dtype
+    gen_meta["stride"] = x.stride()
 
     # quant scaling for exp_avgs
+
     qx = group_tensor(x, group_size)
     lprint(f"qx after group {qx=}")
     lprint(f"{qx.shape=}\n+++++++++++++++++")
 
+    # extract max and save in metadata
     max_per_row = max_reduce_except_dim(qx.abs(), 0)
-    lprint(f"{max_per_row=}")
     qx = qx.div(max_per_row)
-    lprint(f"{qx=}")
+    gen_meta["max1"] = max_per_row
+
     scaled_shape = qx.shape
-    lprint(f"{scaled_shape=}")
+
 
     # metadata = max_per_row, scaled_shape
     # quantize
     grouped_qx = group_tensor(qx, 2048)
     # qx = cuda_kernel_pack_nonlinear(grouped_qx)
     qx = kernel_quant_nonlinear(grouped_qx, qmap, midpoint_lut)
-    # let's do this in place for now
-    lprint(f"{grouped_qx=}")
-    lprint(f"{grouped_qx.shape=}")
 
-    return qx, meta
+
+    return qx, gen_meta
 
 
 def kernel_quant_nonlinear(
