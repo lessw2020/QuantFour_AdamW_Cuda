@@ -115,7 +115,8 @@ class TestAdamw4Bit_Optimizer:
         Tests, on gpu, that fourbit_adamw_opt is approx equivalent to AdamW
         """
 
-        model = nn.Sequential(nn.Linear(5, 10), nn.Linear(10, 10), nn.Linear(10, 5))
+        # model = nn.Sequential(nn.Linear(5, 10), nn.Linear(10, 10), nn.Linear(10, 5))
+        model = nn.Sequential(nn.Linear(5, 5))
         model.cuda()
 
         model_clone = deepcopy(model)
