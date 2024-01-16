@@ -461,15 +461,43 @@ def sqs_dequant(qx, shape, overhead):
     if dim == 1: # group
         x = x.mul(max1)
         #shape = shape1 # kwargs['shape']
+        lprint(f"dim1 {x=}, {x.shape=}")
         x = rebuild_grouped_tensor(x, shape)
     else:
         max_dims = overhead['max_dims']
         lprint(f"{max_dims=}")
-        st = _compute_sm3_scale_tensor(max_dims)
+        st = sqs_scale_tensor(max_dims)
+        #st2 = sqs_scale_tensor2(max_dims)
+        #lprint(f"{st1=}, {st2=}")
+        lprint(f"{st=}, {x=}")
         x = x.mul(st)
-    assert False, 'good'
+        lprint(f"after st mul {x=}")
 
+    if x.stride() != stride:
+        lprint(f"WARNING - mismatch in sqs stride...rebuilding")
+        rebuild_x = torch.empty_strided(x.shape, stride, dtype=dtype, layout=torch.strided, device=x.device)
+        rebuild_x.copy_(x)
+        del x
+        return rebuild_x
+    else:
+        x = x.to(dtype=dtype)
+        return x
 
+def sqs_scale_tensor(max_dims):
+    rank = len(max_dims)
+    scale_tensor = max_dims[0].clone()
+    for i in range(1, rank):
+        # We rely on broadcasting to get the proper end shape.
+        scale_tensor = torch.min(scale_tensor, max_dims[i])
+    return scale_tensor
+
+def sqs_scale_tensor2(max_dims):
+    lprint(f"{max_dims=}, {type(max_dims)=}")
+    scale_tensor = max_dims[0][:1].repeat(len(max_dims), 1)
+    lprint(f"{scale_tensor=}")
+    for i in range(1, len(max_dims)):
+        scale_tensor[i:] = torch.min(scale_tensor[i:], max_dims[i])
+    return scale_tensor
 
 def avgs_dequant(qx, shape, overhead):
     """dequantize the exp_avg"""
@@ -569,7 +597,7 @@ def sqs_dequant_kernel(x, qmap, shape):
         lprint(f"check {unpacked[i]=}, {qmap[val]=}, {val=}")
 
     lprint(f"sqs dequant kernel {unpacked=}")
-    assert False, 'stop'
+    # assert False, 'stop'
 
     return unpacked
 
