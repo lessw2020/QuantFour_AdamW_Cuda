@@ -440,6 +440,9 @@ def avgs_dequant(qx, shape, overhead):
     # shape = overhead["shape"]
 
     # reconstruct grouped tensor
+    stride = overhead['stride']
+    dtype = overhead['dtype']
+    lprint(f"{stride=}, {dtype=}")
     numel = shape.numel()
     recon_flatten = grouped_x.flatten()[:numel]
     recon = recon_flatten.view(shape)
@@ -452,6 +455,7 @@ def avgs_dequant(qx, shape, overhead):
         return recon_x
     else:
         x = x.to(dtype=dtype)
+        lprint(f"completed avgs dequant\n{x=}, {x.shape=}")
         return x
 
 def rebuild_grouped_tensor(grouped_tensor, shape):
