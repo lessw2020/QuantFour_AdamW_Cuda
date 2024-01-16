@@ -403,15 +403,18 @@ def _single_tensor_step(
         # lprint(f"325: after add cdiv {param=}")
 
         # quantize
+        # momentum quant
         qx, gen_meta = avgs_quant(exp_avg, shape=param.shape)
         # todo - err re: not tensor but should be tensor list
         q_exp_avg.data = qx
         exp_avg_q_overhead.update(gen_meta)
-        lprint(f"{exp_avg_q_overhead=}")
+        # lprint(f"{exp_avg_q_overhead=}")
 
-
-        qx, gen = sqs_quant(exp_avg_sq, shape=param.shape)
+        # variance quant
+        qx, gen_meta = sqs_quant(exp_avg_sq, shape=param.shape)
+        exp_avg_sq_q_overhead.update(gen_meta)
         q_exp_avg_sq.data = qx
+        lprint(f"variance quant {exp_avg_sq_q_overhead=}")
 
 def sqs_dequant(qx, shape):
     """dequantize the variance"""
@@ -578,14 +581,13 @@ def sqs_quant(x, shape):
     generated_metadata = {}
     generated_metadata["dtype"] = x.dtype
     generated_metadata["stride"] = x.stride()
-
     generated_metadata["dim"] = qx.dim()
+
     if qx.dim() == 1:  # group
         group_size = 128
         qx = group_tensor(qx, group_size)
         max1 = max_reduce_except_dim(qx.abs(), 0)
         qx = qx.div(max1)
-        lprint(f"{qx=}")
         generated_metadata["max1"] = max1
     else:
 
@@ -596,7 +598,7 @@ def sqs_quant(x, shape):
         generated_metadata["max_dims"] = max_dims
         generated_metadata["max1"] = None
         qx = qx.div(st)
-        lprint(f" {qx=}")
+
     # generated_metadata.update(md)
 
     # qx = nonlinear_quant(qx, qmap, b, round_type=kwargs['round_type'])
@@ -643,6 +645,7 @@ def sqs_quant(x, shape):
 
     lprint(f"*before* quant sqs {qx.shape=}, {qx=}")
     qx = kernel_quant_nonlinear(qx, qmap_variance, variance_midpoint_lut, debug=True)
+    #generated_metadata.update(gen_meta)
     lprint(f"*after* quant sqs {qx.shape=}, {qx=}")
     return qx, generated_metadata
 
