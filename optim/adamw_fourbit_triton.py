@@ -352,7 +352,7 @@ def _single_tensor_step(
         # decoupled weight decay
         param.mul_(1 - lr * weight_decay)
 
-        # dequant
+        # dequant -----------------------
         q_enabled = True  # todo
         sq_enabled = True
 
@@ -376,10 +376,14 @@ def _single_tensor_step(
                 param, memory_format=torch.preserve_format
             )
         else:
+            lprint(f"at dequant for variance, quantized {q_exp_avg_sq=}")
             exp_avg_sq = sqs_dequant(
                 q_exp_avg_sq,
                 shape=param.shape,
+                overhead=exp_avg_sq_q_overhead,
             )
+            exp_avg_sq_q_overhead.clear()
+        # ------ end dequant -----------------------
 
         # update avgs
 
@@ -416,12 +420,33 @@ def _single_tensor_step(
         q_exp_avg_sq.data = qx
         lprint(f"variance quant {exp_avg_sq_q_overhead=}")
 
-def sqs_dequant(qx, shape):
+def sqs_dequant(qx, shape, overhead):
     """dequantize the variance"""
     x = qx.detach()
-    b, signed = 4, False
 
-    x = nonlinear_dequant(x, qmap,) #  b, shape=kwargs['scaled_shape'], round_type=kwargs['round_type'])
+    # load kwargs
+    dtype = overhead['dtype']
+    stride = overhead['stride']
+    max1 = overhead['max1']
+    #shape1 = overhead['shape']
+    #scaled_shape = overhead['scaled_shape']
+    assert False, 'good'
+
+    # kernel dequant
+    x = sqs_dequant_kernel(x, _sqs_qmap, shape1,)
+
+    # rank1 scaling
+    dim = metadata['dim']
+    if dim == 1: # group
+        x = x.mul(max1)
+        shape = shape1 # kwargs['shape']
+        x = rebuild_grouped_tensor(x, shape)
+    else:
+        max_dims = metadata['max_dims']
+        st = _compute_sm3_scale_tensor(max_dims)
+        x = x.mul(st)
+
+
 
 
 def avgs_dequant(qx, shape, overhead):
