@@ -532,8 +532,10 @@ def momentum_quant(qx, shape, in_metadata):
     qx, scaling_metadata = momentum_quant_scaling(qx, in_metadata)
     gen_metadata.update(scaling_metadata)
     lprint(f"{gen_metadata=}")
+
     num_groups = (shape.numel() + 127) // 128
     lprint(f"{num_groups=}")
+
 
     assert False, 'good'
     # grouped_x = ext_quantization.unpack_nonlinear(qx, qmap, b, num_groups, 2048)
@@ -570,8 +572,10 @@ def momentum_quant_scaling(qx, in_metadata):
 
     qx = create_grouped_tensor(qx, group_size)
     max1 = max_reduce_except_dim(qx.abs(), 0)
-    gen_metadata['max1'] = max1
     qx = qx.div(max1)
+
+    gen_metadata['max1'] = max1
+    gen_metadata['scaled_shape'] = qx.shape
 
     return qx, gen_metadata
 
