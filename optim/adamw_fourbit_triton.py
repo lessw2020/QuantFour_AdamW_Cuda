@@ -34,6 +34,27 @@ _momentum_qmap = torch.tensor(
             ]
         )
 
+_momentum_midpoint_lut = torch.tensor(
+        [
+            -0.775,
+            -0.55,
+            -0.325,
+            -0.145,
+            -0.055,
+            -0.019,
+            -0.00275,
+            0.00275,
+            0.019,
+            0.055,
+            0.145,
+            0.325,
+            0.55,
+            0.775,
+            0.94375,
+        ],
+        dtype=torch.float32,
+        device="cuda",
+    )
 _sqs_qmap = torch.tensor(
             [
                 0.0625,
@@ -530,14 +551,18 @@ def momentum_quant(qx, shape, in_metadata):
 
     # scale the tensor with grouped scaling
     qx, scaling_metadata = momentum_quant_scaling(qx, in_metadata)
+    # adds scaled shape, max1 to metadata
     gen_metadata.update(scaling_metadata)
     lprint(f"{gen_metadata=}")
 
-    num_groups = (shape.numel() + 127) // 128
-    lprint(f"{num_groups=}")
+    # quantize the qx tensor
+    lprint(f" prequant {qx=}, {qx.shape=}")
+    qx = kernel_quant_nonlinear(qx, qmap=_momentum_qmap,
+                            midpoint_lut=_momentum_midpoint_lut, debug=False)
+    lprint(f"post quant {qx=}, {qx.shape=}")
+    return qx, gen_metadata
 
-
-    assert False, 'good'
+def momentum_dequant():
     # grouped_x = ext_quantization.unpack_nonlinear(qx, qmap, b, num_groups, 2048)
     x = rebuild_grouped_tensor(grouped_x, shape)
     lprint(f"premul {x=}, {x.shape=}")
@@ -863,27 +888,7 @@ def avgs_quant(x, shape):
         dtype=torch.float32,
         device="cuda",
     )
-    midpoint_lut = torch.tensor(
-        [
-            -0.775,
-            -0.55,
-            -0.325,
-            -0.145,
-            -0.055,
-            -0.019,
-            -0.00275,
-            0.00275,
-            0.019,
-            0.055,
-            0.145,
-            0.325,
-            0.55,
-            0.775,
-            0.94375,
-        ],
-        dtype=torch.float32,
-        device="cuda",
-    )
+
 
     qx = x.detach()
     lprint(f"{qx=}")
