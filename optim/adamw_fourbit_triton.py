@@ -1,6 +1,6 @@
 import math
 from dataclasses import dataclass
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List, Optional, Tuple
 
 import torch
 import torch.distributed as dist
@@ -426,19 +426,27 @@ def _single_tensor_step(
         param.addcdiv_(exp_avg, denom, value=-step_size)
         # lprint(f"325: after add cdiv {param=}")
 
-        # quantize
+        # ------- quantize ----------------------------------
+
         # momentum quant
-        qx, gen_meta = avgs_quant(exp_avg, shape=param.shape)
+        lprint(f"{step=}, start momentum quant {exp_avg=}, {exp_avg.shape}")
+        lprint(f"{exp_avg_q_overhead=}")
+
+        qx, gen_meta = momentum_quant(exp_avg, shape=param.shape, in_metadata=exp_avg_q_overhead)
+        assert False, 'good'
         # todo - err re: not tensor but should be tensor list
         q_exp_avg.data = qx
         exp_avg_q_overhead.update(gen_meta)
-        # lprint(f"{exp_avg_q_overhead=}")
+
 
         # variance quant
         qx, gen_meta = sqs_quant(exp_avg_sq, shape=param.shape)
         exp_avg_sq_q_overhead.update(gen_meta)
         q_exp_avg_sq.data = qx
         lprint(f"variance quant {exp_avg_sq_q_overhead=}")
+
+        # ------- end quantize ----------------------------------
+        # end step
 
 def sqs_dequant(qx, shape, overhead):
     """dequantize the variance"""
@@ -499,16 +507,35 @@ def sqs_scale_tensor2(max_dims):
         scale_tensor[i:] = torch.min(scale_tensor[i:], max_dims[i])
     return scale_tensor
 
-def avgs_dequant(qx, shape, overhead):
-    """dequantize the exp_avg"""
+def momentum_quant(qx, shape, in_metadata):
+    """
+    quantize the exp_avg
+
+    bits = 4
+    group_size = 128
+    scale_type = "group"
+    quant_type = "nonlinear"
+    round_type = "real-nearest"
+    signed = True
+    threshold = 4096
+
+    """
     x = qx.detach()
-    b, signed = 4, True
-    lprint(f"avgs dequant {x=}, {shape=}, {overhead=}")
 
-    # x = nonlinear_dequant(x, qmap, b, shape=kwargs['scaled_shape'], )
+    # save kwargs
+    gen_metadata = {}
+    gen_metadata['dtype'] = x.dtype
+    gen_metadata['stride'] = x.stride()
+
+
+    # scale the tensor with grouped scaling
+    qx, scaling_metadata = momentum_quant_scaling(qx, in_metadata)
+    gen_metadata.update(scaling_metadata)
+    lprint(f"{gen_metadata=}")
     num_groups = (shape.numel() + 127) // 128
-    grouped_x = avgs_dequant_kernel(x, _momentum_qmap, num_groups, 128)
+    lprint(f"{num_groups=}")
 
+    assert False, 'good'
     # grouped_x = ext_quantization.unpack_nonlinear(qx, qmap, b, num_groups, 2048)
     x = rebuild_grouped_tensor(grouped_x, shape)
     lprint(f"premul {x=}, {x.shape=}")
@@ -535,6 +562,55 @@ def avgs_dequant(qx, shape, overhead):
         x = x.to(dtype=dtype)
         lprint(f"completed avgs dequant\n{x=}, {x.shape=}")
         return x
+
+def momentum_quant_scaling(qx, in_metadata):
+    """scale the tensor via group scaling"""
+    gen_metadata = {}
+    group_size = 128 # fixed
+
+    qx = create_grouped_tensor(qx, group_size)
+    max1 = max_reduce_except_dim(qx.abs(), 0)
+    gen_metadata['max1'] = max1
+    qx = qx.div(max1)
+
+    return qx, gen_metadata
+
+
+'''def group_tensor(x: Tensor, group_size: int):
+    """break the tensor into rows of 'group size', padding if needed with zeros"""
+    x_flat = x.flatten()
+    num_flat = x_flat.shape[0]
+
+    # reshape
+    if num_flat % group_size != 0:
+        # pad
+        new_num_flat = (num_flat // group_size + 1) * group_size
+        delta = new_num_flat - num_flat
+
+        x_flat = torch.cat(
+            [x_flat, torch.zeros([delta], dtype=x.dtype, device=x.device)], dim=0
+        )
+    x_groups = x_flat.view(-1, group_size)
+    return x_groups
+'''
+
+def create_grouped_tensor(input: torch.Tensor, group_size: int) -> Tuple[torch.Tensor, int]:
+    "Group tensor into subtensors of size 'group_size', padding if needed with 0s"
+
+    if not isinstance(group_size, int) or group_size <= 0:
+        raise ValueError("group size needs to be a positive integer")
+
+    num_features = input.shape[-1]
+    if num_features % group_size != 0:
+        # Pad so that number of features is divisible by group size
+        pad_amount = ((num_features//group_size)+1)*group_size-num_features
+        input = torch.nn.functional.pad(input, (0,pad_amount), value=0.)
+        num_features += pad_amount
+
+
+    groups = input.unbind(dim=-1)[:num_features]
+    groups = torch.stack(groups).transpose(-2,-1)
+    return groups
 
 def rebuild_grouped_tensor(grouped_tensor, shape):
     numel = shape.numel()
@@ -982,24 +1058,6 @@ def bsearch(x, qmap, midpoint_lut):
     return rank;
 }
     """
-
-
-def group_tensor(x: Tensor, group_size: int):
-    """break the tensor into rows of 'group size', padding if needed with zeros"""
-    x_flat = x.flatten()
-    num_flat = x_flat.shape[0]
-
-    # reshape
-    if num_flat % group_size != 0:
-        # pad
-        new_num_flat = (num_flat // group_size + 1) * group_size
-        delta = new_num_flat - num_flat
-
-        x_flat = torch.cat(
-            [x_flat, torch.zeros([delta], dtype=x.dtype, device=x.device)], dim=0
-        )
-    x_groups = x_flat.view(-1, group_size)
-    return x_groups
 
 
 def max_reduce_except_dim(input, dim):
