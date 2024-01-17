@@ -454,18 +454,17 @@ def _single_tensor_step(
         lprint(f"{exp_avg_q_overhead=}")
 
         qx, gen_meta = momentum_quant(exp_avg, shape=param.shape, in_metadata=exp_avg_q_overhead)
-        assert False, 'good'
-        # todo - err re: not tensor but should be tensor list
+        # save quantized info
         q_exp_avg.data = qx
         exp_avg_q_overhead.update(gen_meta)
-
+        lprint(f"momentum quant {exp_avg_q_overhead=}")
 
         # variance quant
-        qx, gen_meta = sqs_quant(exp_avg_sq, shape=param.shape)
+        qx, gen_meta = variance_quant(exp_avg_sq, shape=param.shape)
         exp_avg_sq_q_overhead.update(gen_meta)
         q_exp_avg_sq.data = qx
         lprint(f"variance quant {exp_avg_sq_q_overhead=}")
-
+        assert False, 'good'
         # ------- end quantize ----------------------------------
         # end step
 
@@ -710,7 +709,7 @@ def sqs_dequant_kernel(x, qmap, shape):
 
 
 
-def get_sqs_tensor_statistics(
+def get_variance_tensor_statistics(
     x,
 ):
     qx = x.abs()
@@ -721,12 +720,20 @@ def get_sqs_tensor_statistics(
     return max_dims
 
 
-def compute_sqs_tensor_scale(max_dims):
+def compute_variance_tensor_scale(max_dims):
     rank = len(max_dims)
+    lprint(f"----- compute variance tensor scale -----")
+    lprint(f"{max_dims=}")
     scale_tensor = max_dims[0].clone()
+    lprint(f" start {scale_tensor=}")
     for i in range(1, rank):
         # broadcasting
         scale_tensor = torch.min(scale_tensor, max_dims[i])
+        lprint(f"loop update {scale_tensor=}, {max_dims[i]=}")
+    lprint(f"{scale_tensor=}")
+    lprint(f"{scale_tensor.shape=}")
+    lprint(f"{scale_tensor.dtype=}")
+    lprint(f"+++++++++++++ end tensor scale ***************")
     return scale_tensor
 
 
@@ -773,17 +780,30 @@ def compute_sqs_tensor_scale(max_dims):
 '''
 
 
-def sqs_quant(x, shape):
-    """quantize the exp_avg_sq with rank1"""
-    # grouped_qx = group_tensor(qx, 2048)
-    # todo next
-    qx = x.detach()  # keep the reference of original tensor
+def variance_quant(x, shape):
+    """
+    quantize the variance with rank1
 
-    # save kwargs
-    generated_metadata = {}
-    generated_metadata["dtype"] = x.dtype
-    generated_metadata["stride"] = x.stride()
-    generated_metadata["dim"] = qx.dim()
+    bits = 4
+    group_size = 128
+    scale_type = "rank1"
+    quant_type = "power-1"
+    round_type = "real-nearest"
+    signed = False
+    threshold = 4096
+
+
+
+    """
+    qx = x.detach()
+
+    # save meta info
+    gen_metadata = {}
+    gen_metadata["dtype"] = x.dtype
+    gen_metadata["stride"] = x.stride()
+
+    # quant scaling for variance
+    qx, gen_metadata = variance_quant_scaling(qx, shape)
 
     if qx.dim() == 1:  # group
         group_size = 128
@@ -793,9 +813,9 @@ def sqs_quant(x, shape):
         generated_metadata["max1"] = max1
     else:
 
-        max_dims = get_sqs_tensor_statistics(qx.abs())
+        max_dims = get_variance_tensor_statistics(qx)
         lprint(f"{max_dims=}")
-        st = compute_sqs_tensor_scale(max_dims)
+        st = compute_variance_tensor_scale(max_dims)
         lprint(f"{st=}")
         generated_metadata["max_dims"] = max_dims
         generated_metadata["max1"] = None
@@ -851,6 +871,38 @@ def sqs_quant(x, shape):
     lprint(f"*after* quant sqs {qx.shape=}, {qx=}")
     return qx, generated_metadata
 
+
+def variance_quant_scaling(qx, shape):
+    """
+    scale the variance with rank1
+    """
+    gen_metadata = {}
+    gen_metadata['dim'] = qx.dim()
+
+    if qx.dim() == 1: # group
+        group_size = 128
+        qx = group_tensor(qx, group_size)
+        max1 = max_reduce_except_dim(qx.abs(), 0)
+        qx = qx.div(max1)
+        gen_metadata['max1'] = max1
+    else:
+        max_dims = get_variance_tensor_statistics(qx.abs())
+        st = compute_variance_tensor_scale(max_dims)
+        gen_metadata['max_dims'] = max_dims
+        gen_metadata['max1'] = None
+        lprint(f"{st=}")
+        lprint(f"{max_dims=}")
+        lprint(f"prescale {qx=}")
+        qx = qx.div(st)
+        lprint(f"postscale {qx=}")
+
+    gen_metadata['scaled_shape'] = qx.shape
+    lprint(f"vq_scaling {gen_metadata=}")
+    lprint(f"vq_scaling {qx.shape=}")
+    lprint(f"===========================")
+    lprint(f"final {qx=}")
+    assert False,'good'
+    return qx, gen_metadata
 
 
 
