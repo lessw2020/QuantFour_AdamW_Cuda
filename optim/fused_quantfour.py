@@ -290,6 +290,25 @@ class AdamWFused_QuantFour(torch.optim.Optimizer):
                 # update step
                 step_t += 1
 
+                if momentum_quant_enabled[i]:
+                    p_numel = param.numel()
+
+                    bytelength = (p_numel + 1) // 2
+                    blocks = (p_numel() + 127) // 128
+
+                    if q_exp_avg.numel() <= 1:
+                        q_exp_avg.data = torch.zeros((bytelength,), dtype=torch.int8, device=param.device)
+                    if q_exp_avg_sq.numel() <= 1:
+                        q_exp_avg_sq.data = torch.zeros((bytelength,), dtype=torch.int8, device=param.device)
+
+
+                    exp_avg_scale = torch.zeros((blocks,), dtype=torch.float32, device=param.device)
+                    exp_avgs_q_overhead[i]["max1"] = exp_avg_scale
+
+
+                    exp_avg_sq_scale = torch.zeros((blocks,), dtype=torch.float32, device=param.device)
+                    exp_avg_sqs_q_overhead[i]["max1"] = exp_avg_sq_scale
+
 
 def _single_tensor_step(
     params_with_grad: List[Tensor],
