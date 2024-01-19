@@ -280,8 +280,15 @@ class AdamWFused_QuantFour(torch.optim.Optimizer):
             weight_decay=group["weight_decay"],
             eps=group["eps"],
 
+            # step processing
+            for i, param in enumerate(params_with_grad):
+                grad = grads[i]
+                q_exp_avg = exp_avgs[i]
+                q_exp_avg_sq = exp_avg_sqs[i]
+                step_t = state_steps[i]
 
-            _single_tensor_step(**kwargs)
+                # update step
+                step_t += 1
 
 
 def _single_tensor_step(
