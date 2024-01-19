@@ -309,6 +309,19 @@ class AdamWFused_QuantFour(torch.optim.Optimizer):
                     exp_avg_sq_scale = torch.zeros((blocks,), dtype=torch.float32, device=param.device)
                     exp_avg_sqs_q_overhead[i]["max1"] = exp_avg_sq_scale
 
+                    # start fused kernel here....
+                    assert p.is_cuda(), f"param must be on cuda"
+                    assert p.is_contiguous(), f"param must be contiguous"
+                    num_elem = p.numel()
+                    # verify params numel matches relevant partners numel
+                    assert exp_avg.numel() == num_elem, f"exp_avg numel {exp_avg.numel()} != param numel {num_elem}"
+                    assert exp_avg_sq.numel() == num_elem, f"exp_avg_sq numel {exp_avg_sq.numel()} != param numel {num_elem}"
+                    assert grad.numel() == num_elem, f"grad numel {grad.numel()} != param numel {num_elem}"
+
+
+                    #fused_adamw_cuda(p, g, exp_avg, exp_avg_sq,
+                    #                beta1, beta2, lr, weight_decay, eps, step);
+
 
 def _single_tensor_step(
     params_with_grad: List[Tensor],
