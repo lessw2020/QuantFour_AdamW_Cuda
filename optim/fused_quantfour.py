@@ -8,7 +8,7 @@ from torch import Tensor
 import sys
 from .quant_opt_base import create_dynamic_map, create_pow_map, create_qmap
 
-__all__ = ["AdamW_QuantFour"]
+__all__ = ["AdamW_Fused_QuantFour"]
 
 def lprint(msg=""):
   print(f"Debug ++> {sys._getframe().f_back.f_lineno}: {msg}")
@@ -96,18 +96,10 @@ _variance_midpoint_lut = torch.tensor(
         ]
     )
 
-@dataclass
-class QuantParams:
-    bits: int
-    group_size: int
-    scale_type: str
-    quant_type: str
-    round_type: str
-    signed: bool
-    threshold: int
-    enable: bool = True
 
 
+
+'''
 class FirstMoment(QuantParams):
     bits = 4
     group_size = 128
@@ -126,16 +118,17 @@ class SecondMoment(QuantParams):
     round_type = "real-nearest"
     signed = False
     threshold = 4096
+'''
 
-
-def _get_qenable_fn(p, threshold) -> bool:
+def enable_param_quantization(p, threshold) -> bool:
+    """ only enable quantization if the parameter is large enough """
     if threshold and p.numel() <= threshold:
         return False
     return True
 
 
-class AdamW_QuantFour(torch.optim.Optimizer):
-    """4bit AdamW with Triton fusion
+class AdamWFused_QuantFour(torch.optim.Optimizer):
+    """4bit Fused AdamW with Triton fusion
     based on lpmm 4bit Optimizers"""
 
     def __init__(
@@ -159,55 +152,7 @@ class AdamW_QuantFour(torch.optim.Optimizer):
         if not 0.0 <= weight_decay:
             raise ValueError(f"Invalid weight_decay value: {weight_decay=}")
 
-        # q specific
-        if dist.is_initialized():
-            seed = torch.randint(1 << 31, size=[], device=torch.device("cuda"))
-            dist.broadcast(seed, src=0)
-
-        self.config_momentum = FirstMoment
-        self.config_variance = SecondMoment
-        self.qmaps = {}
-        self.momentum_qmap = torch.tensor(
-            [
-                -0.8875,
-                -0.6625,
-                -0.4375,
-                -0.2125,
-                -0.0775,
-                -0.0325,
-                -0.0055,
-                0.0000,
-                0.0055,
-                0.0325,
-                0.0775,
-                0.2125,
-                0.4375,
-                0.6625,
-                0.8875,
-                1.0000,
-            ]
-        )
-
-        self.variance_qmap = torch.tensor(
-            [
-                0.0625,
-                0.1250,
-                0.1875,
-                0.2500,
-                0.3125,
-                0.3750,
-                0.4375,
-                0.5000,
-                0.5625,
-                0.6250,
-                0.6875,
-                0.7500,
-                0.8125,
-                0.8750,
-                0.9375,
-                1.0000,
-            ]
-        )
+        self.param_quant_threshold = 128
 
         defaults = dict(
             lr=lr,
@@ -218,17 +163,6 @@ class AdamW_QuantFour(torch.optim.Optimizer):
         )
         super().__init__(params, defaults)
 
-    def get_qmetadata_by_state_name(self, optimizer_state_name):
-        subconfig = self.get_subqconfig(optimizer_state_name)
-        md = dict(
-            b=subconfig.bits,
-            scale_type=subconfig.scale_type,
-            quant_type=subconfig.quant_type,
-            round_type=subconfig.round_type,
-            gp_sz=subconfig.group_size,
-            signed=subconfig.signed,
-        )
-        return md
 
     def init_qstate(self, p, state_name):
         state = self.state[p]
@@ -241,29 +175,8 @@ class AdamW_QuantFour(torch.optim.Optimizer):
             "qmap": None,
         }
         subconfig = self.get_subqconfig(state_name)
-        state[field]["enable"] = _get_qenable_fn(p, subconfig.threshold)
+        state[field]["enable"] = enable_param_quantization(p, self.param_quant_threshold)
 
-        md = self.get_qmetadata_by_state_name(state_name)
-        # lprint(f"{md=}")
-        qmap_key = (md["quant_type"], md["b"], md["signed"])
-        # lprint(f"{qmap_key=}")
-
-        if qmap_key not in self.qmaps:
-            self.qmaps[qmap_key] = create_qmap(*qmap_key)
-            lprint(f"created qmap = {self.qmaps[qmap_key]=}")
-        # self.qmaps[qmap_key] = self.qmaps[qmap_key].to(p.device)
-        state[field]["qmap"] = self.qmaps[qmap_key]
-        # lprint(f"completing state for {state_name=}, with {state=}")
-
-    def create_qmap(quant_type, bit, signed):
-        """create qmap for quantization"""
-        if quant_type == "nonlinear":
-            return create_dynamic_map(signed, bit - 1, bit if signed else bit - 1)
-        elif quant_type == "power-1":
-            return create_pow_map(bit, signed, 1)
-
-        else:
-            raise ValueError(f"Not support {quant_type} quant type.")
 
     def __setstate__(self, state: Dict[str, Any]) -> None:
         super().__setstate__(state)
@@ -279,13 +192,6 @@ class AdamW_QuantFour(torch.optim.Optimizer):
             for s in state_values:
                 s["step"] = torch.tensor(float(s["step"]))
 
-    def get_subqconfig(self, optimizer_state_name):
-        if optimizer_state_name == "momentum":
-            return self.config_momentum
-        elif optimizer_state_name == "variance":
-            return self.config_variance
-        else:
-            raise ValueError(f" invalid state name {optimizer_state_name=}")
 
     def _init_group(
         self,
@@ -297,6 +203,8 @@ class AdamW_QuantFour(torch.optim.Optimizer):
         state_steps,
         momentum_meta,
         variance_meta,
+        momentum_quant_enabled,
+
     ):
 
         for p in group["params"]:
@@ -326,7 +234,7 @@ class AdamW_QuantFour(torch.optim.Optimizer):
 
             momentum_meta.append(state["momentum_qstate"]["overhead"])
             variance_meta.append(state["variance_qstate"]["overhead"])
-
+            momentum_quant_enabled.append(state["momentum_qstate"]["enable"])
             # exp_avgs_q_enabled.append(self.override_q_enable[id(p)] if id(p) in self.override_q_enable else state["exp_avg_qstate"]["enable"])
             # exp_avg_sqs_q_enabled.append(self.override_q_enable[id(p)] if id(p) in self.override_q_enable else state["exp_avg_sq_qstate"]["enable"])
             # exp_avgs_q_overhead.append(state["exp_avg_qstate"]["overhead"])
@@ -352,6 +260,7 @@ class AdamW_QuantFour(torch.optim.Optimizer):
             beta1, beta2 = group["betas"]
             momentum_meta = []
             variance_meta = []
+            momentum_quant_enabled = []
 
             self._init_group(
                 group,
@@ -362,22 +271,15 @@ class AdamW_QuantFour(torch.optim.Optimizer):
                 state_steps,
                 momentum_meta,
                 variance_meta,
+                momentum_quant_enabled
             )
 
-            kwargs = dict(
-                params_with_grad=params_with_grad,
-                grads=grads,
-                exp_avgs=exp_avgs,
-                exp_avg_sqs=exp_avg_sqs,
-                state_steps=state_steps,
-                beta1=beta1,
-                beta2=beta2,
-                lr=group["lr"],
-                weight_decay=group["weight_decay"],
-                eps=group["eps"],
-                momentum_meta = momentum_meta,
-                variance_meta = variance_meta,
-            )
+            # settings
+
+            lr=group["lr"],
+            weight_decay=group["weight_decay"],
+            eps=group["eps"],
+
 
             _single_tensor_step(**kwargs)
 

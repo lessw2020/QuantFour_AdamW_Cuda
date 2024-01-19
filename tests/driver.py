@@ -42,11 +42,12 @@ class TestAdamw4Bit_Optimizer:
         for p1, p2 in zip(model_clone.parameters(), model_orig_params):
             assert_expected(p1, p2)
         print(f"len model {len(model_orig_params)}")
+        _size = 5
 
         for i in range(2):
             adam_opt.zero_grad(set_to_none=True)
             fourbit_adamw_opt.zero_grad(set_to_none=True)
-            inp = torch.randn(5, 5, device=next(model.parameters()).device)
+            inp = torch.randn(_size, _size, device=next(model.parameters()).device)
             model(inp).sum().backward()
             model_clone(inp).sum().backward()
             adam_opt.step()
@@ -95,7 +96,7 @@ class TestAdamw4Bit_Optimizer:
                 adam_opt.zero_grad(set_to_none=False)
                 fourbit_adamw_opt.zero_grad(set_to_none=False)
 
-            inp = torch.randn(5, 5, device=next(model.parameters()).device)
+            inp = torch.randn(4096, 4096, device=next(model.parameters()).device)
             model(inp).sum().backward()
             model_clone(inp).sum().backward()
             adam_opt.step()
@@ -116,7 +117,7 @@ class TestAdamw4Bit_Optimizer:
         """
 
         # model = nn.Sequential(nn.Linear(5, 10), nn.Linear(10, 10), nn.Linear(10, 5))
-        model = nn.Sequential(nn.Linear(5, 5))
+        model = nn.Sequential(nn.Linear(5, 10), nn.Linear(10, 5))
         model.cuda()
 
         model_clone = deepcopy(model)
