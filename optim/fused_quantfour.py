@@ -312,15 +312,27 @@ class AdamWFused_QuantFour(torch.optim.Optimizer):
                     # start fused kernel here....
                     assert p.is_cuda(), f"param must be on cuda"
                     assert p.is_contiguous(), f"param must be contiguous"
-                    num_elem = p.numel()
+                    p_num_elem = p.numel()
                     # verify params numel matches relevant partners numel
-                    assert exp_avg.numel() == num_elem, f"exp_avg numel {exp_avg.numel()} != param numel {num_elem}"
-                    assert exp_avg_sq.numel() == num_elem, f"exp_avg_sq numel {exp_avg_sq.numel()} != param numel {num_elem}"
-                    assert grad.numel() == num_elem, f"grad numel {grad.numel()} != param numel {num_elem}"
+                    assert exp_avg.numel() == p_num_elem, f"exp_avg numel {exp_avg.numel()} != param numel {num_elem}"
+                    assert exp_avg_sq.numel() == p_num_elem, f"exp_avg_sq numel {exp_avg_sq.numel()} != param numel {num_elem}"
+                    assert grad.numel() == p_num_elem, f"grad numel {grad.numel()} != param numel {num_elem}"
 
 
-                    #fused_adamw_cuda(p, g, exp_avg, exp_avg_sq,
-                    #                beta1, beta2, lr, weight_decay, eps, step);
+                    fused_4bit_triton_wrapper(p, p_num_elem, grads, exp_avg, exp_avg_sq,
+                                    beta1, beta2, lr, weight_decay, eps, step)
+
+
+def fused_4bit_triton_wrapper(p, p_num_elem, g, exp_avg, exp_avg_sq,
+                                beta1, beta2, lr, weight_decay, eps, step):
+    # prep and launch triton kernel
+    # assert p_numel < maxof int32
+    block_size = 128
+    num_blocks = (p_num_elem + block_size - 1) // block_size
+    grid = (num_blocks,)
+
+
+
 
 
 def _single_tensor_step(
