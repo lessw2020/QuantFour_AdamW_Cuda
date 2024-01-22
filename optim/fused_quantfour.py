@@ -330,7 +330,42 @@ def fused_4bit_triton_wrapper(p, p_num_elem, g, exp_avg, exp_avg_sq,
     block_size = 128
     num_blocks = (p_num_elem + block_size - 1) // block_size
     grid = (num_blocks,)
+    k2 = kernel_single_step[(grid,)](
+        p,   g,    exp_avg,    exp_avg_sq,    beta1,    beta2,    lr,
+        weight_decay,    eps,    step,    p_num_elem,
+        _momentum_qmap, _momentum_midpoint_lut,
+        _variance_qmap, _variance_midpoint_lut,
+        block_size,)
 
+
+import triton
+import triton.language as tl
+@triton.jit
+def kernel_single_step(
+    p: tl.tensor,
+    g: tl.tensor,
+    exp_avg: tl.tensor,
+    exp_avg_sq: tl.tensor,
+    beta1: tl.constexpr,
+    beta2: tl.constexpr,
+    lr: tl.constexpr,
+    weight_decay: tl.constexpr,
+    eps: tl.constexpr,
+    step: tl.constexpr,
+    p_num_elem: tl.constexpr,
+    _momentum_qmap: tl.constexpr,
+    _momentum_midpoint_lut: tl.constexpr,
+    _variance_qmap: tl.constexpr,
+    _variance_midpoint_lut: tl.constexpr,
+    block_size: tl.constexpr,):
+
+
+
+
+
+
+
+    # -------- end kernel ---------------
 
 
 
