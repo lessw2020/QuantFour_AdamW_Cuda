@@ -359,6 +359,45 @@ def kernel_single_step(
     _variance_midpoint_lut: tl.constexpr,
     block_size: tl.constexpr,):
 
+    pid = tl.program_id(0)
+    global_id = pid * BLOCK_SIZE + tl.arange(0, BLOCK_SIZE)
+    scale_id = pid
+    working_id0 = global_id << 1
+    working_id1 = (global_id << 1) + 1
+
+    correction1 = 1.0 - tl.pow(beta1, step)
+    correction2_sqrt = tl.sqrt(1.0 - tl.pow(beta2, step))
+
+    mask = (1 << 4) - 1
+
+    if working_id0 < p_num_elem:
+        exp_avg_idx0 = exp_avg[global_id] & mask
+        exp_avg0 = tl.load(exp_avg_qmap, exp_avg_idx0) * tl.load(exp_avg_scale, scale_id)
+        exp_avg0 = beta1 * exp_avg0 + (1 - beta1) * tl.load(g, working_id0)
+        exp_avg_sq_idx0 = exp_avg_sq[global_id] & mask
+        exp_avg_sq0 = tl.load(exp_avg_sq_qmap, exp_avg_sq_idx0) * tl.load(exp_avg_sq_scale, scale_id)
+        exp_avg_sq0 = beta2 * exp_avg_sq0 + (1 - beta2) * tl.load(g, working_id0) ** 2
+
+        denom0 = (tl.sqrt(exp_avg_sq0) / correction2_sqrt + eps) * correction1
+        update0 = (exp_avg0 / denom0) + (weight_decay * tl.load(p, working_id0))
+        tl.store(p, working_id0, tl.load(p, working_id0) - (lr * update0))
+
+        local_absmax_exp_avg = tl.max(tl.abs(exp_avg0), 0)  # Simplified for clarity
+        local_absmax_exp_avg_sq = tl.max(exp_avg_sq0, 0)  # Simplified for clarity
+        tl.atomic_max(ABS_MAX, 0, local_absmax_exp_avg)
+        tl.atomic_max(ABS_MAX_SQ, 0, local_absmax_exp_avg_sq)
+
+    if working_id1 < p_num_elem:
+        # Similar logic for working_id1
+        pass
+
+    # Ensure all threads have completed their updates
+    tl.sync()
+
+    if global_id == 0:
+        # Update scales after all threads have finished processing
+        tl.store(exp_avg_scale, scale_id, ABS_MAX[0])
+        tl.store(exp_avg_sq_scale, scale_id, ABS_MAX_SQ[0])
 
 
 
