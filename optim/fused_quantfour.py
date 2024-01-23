@@ -417,23 +417,9 @@ def fused_4bit_triton_wrapper_starter(p, p_num_elem, g, exp_avg, exp_avg_sq,
     #num_blocks = (p_num_elem + block_size - 1) // block_size
     grid = (num_blocks,)
     lprint(f"launching triton kernel itself {grid=}")
-    #lprint(f"{g=}")
 
-    '''lprint(f"beta1 {beta1=}, type {type(beta1)}")
-    lprint(f"beta2 {beta2=}, type {type(beta2)}")
-    lprint(f"step {step=}, type {type(step)}")
 
-    lprint(f"step_float {step_float=}, type {type(step_float)}")
-    lprint(f"lr {lr=}, type {type(lr)}")
-    float_lr = float(lr[0])
-    lprint(f"weight_decay {weight_decay=}, type {type(weight_decay)}")
-    float_weight_decay = float(weight_decay[0])
-    lprint(f"eps {eps=}, type {type(eps)}")
-    eps_float = float(eps[0])
-    lprint(f"eps_float {eps_float=}, type {type(eps_float)}")
-    lprint(f"p  {p.data=}, type {type(p.data)}")
-    #assert False, 'check p'
-    '''
+
     step_float = float(step.item())
 
     grid = lambda meta: (triton.cdiv(total_size, meta['block_size']),)
@@ -444,9 +430,7 @@ def fused_4bit_triton_wrapper_starter(p, p_num_elem, g, exp_avg, exp_avg_sq,
         #_variance_qmap, _variance_midpoint_lut,
         block_size,)
 
-    lprint(f"exp_avg {exp_avg=}")
-    #lprint(f"exp_avg_sq {exp_avg_sq=}")
-    # assert False, 'check exp avg'
+
 
 
 @triton.jit
@@ -486,7 +470,6 @@ def kernel_noquant_single_step(
     correction2_sqrt = tl.sqrt(1.0 - (beta2**step))
 
     step_size = lr / correction1
-
     denom = ((tl.sqrt(exp_avg_sq_val) / correction2_sqrt) + eps) # * correction1
 
     update = (exp_avg_val / denom)
@@ -498,9 +481,6 @@ def kernel_noquant_single_step(
     tl.store(p + thread_offsets, p_val, mask=mask)
     tl.store(exp_avg + thread_offsets, exp_avg_val, mask=mask)
     tl.store(exp_avg_sq + thread_offsets, exp_avg_sq_val, mask=mask)
-
-
-
 
 
 def fused_4bit_triton_wrapper(p, p_num_elem, g, exp_avg, exp_avg_sq,
