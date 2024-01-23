@@ -469,35 +469,28 @@ def kernel_noquant_single_step(
     thread_offsets = pid * block_size + tl.arange(0, block_size)
     mask = thread_offsets < total_size
 
-    # decoupled weight decay
-    # param.mul_(1 - lr * weight_decay)
+
     g_val = tl.load(g+thread_offsets, mask=mask)
     p_val = tl.load(p+thread_offsets, mask=mask)
     exp_avg_val = tl.load(exp_avg+thread_offsets, mask=mask)
-    #tl.device_print("exp avg val ", exp_avg_val)
     exp_avg_sq_val = tl.load(exp_avg_sq+thread_offsets, mask=mask)
 
     # AdamW update
-    # delinked weight decay
+    # decoupled weight decay
     p_val = p_val * (1 - lr * weight_decay)
 
     exp_avg_val = beta1 * exp_avg_val + (1 - beta1) * g_val
-    #tl.device_print("after exp avg val ", exp_avg_val)
     exp_avg_sq_val = beta2 * exp_avg_sq_val + (1 - beta2) * g_val * g_val
 
     correction1 = 1.0 - (beta1**step)
-    #tl.device_print("correction1 ", correction1)
     correction2_sqrt = tl.sqrt(1.0 - (beta2**step))
-    #tl.device_print("correction2_sqrt ", correction2_sqrt)
+
     step_size = lr / correction1
-    #tl.device_print("step size ", step_size)
-    # denom = (exp_avg_sq2.sqrt() / bias_corr2_sqrt).add_(eps)
+
     denom = ((tl.sqrt(exp_avg_sq_val) / correction2_sqrt) + eps) # * correction1
-    # tl.device_print("denom ", denom)
 
+    update = (exp_avg_val / denom)
 
-    update = (exp_avg_val / denom) #+ (weight_decay * p_val)
-    tl.device_print("update ", update)
     # weight update
     p_val = p_val - step_size * update
 
