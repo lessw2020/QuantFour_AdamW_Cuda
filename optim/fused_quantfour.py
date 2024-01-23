@@ -340,11 +340,24 @@ def fused_4bit_triton_wrapper_starter(p, p_num_elem, g, exp_avg, exp_avg_sq,
     lprint(f"launching triton kernel itself {grid=}")
     #lprint(f"{g=}")
 
-    lprint(f"exp_avg {exp_avg=}")
-
-    k2 = kernel_noquant_single_step[(grid,)](
-        p,   g,    exp_avg,    exp_avg_sq,    beta1,    beta2,    lr,
-        weight_decay,    eps,    step,    total_size,
+    lprint(f"beta1 {beta1=}, type {type(beta1)}")
+    lprint(f"beta2 {beta2=}, type {type(beta2)}")
+    lprint(f"step {step=}, type {type(step)}")
+    step_float = float(step.item())
+    lprint(f"step_float {step_float=}, type {type(step_float)}")
+    lprint(f"lr {lr=}, type {type(lr)}")
+    float_lr = float(lr[0])
+    lprint(f"weight_decay {weight_decay=}, type {type(weight_decay)}")
+    float_weight_decay = float(weight_decay[0])
+    lprint(f"eps {eps=}, type {type(eps)}")
+    eps_float = float(eps[0])
+    lprint(f"eps_float {eps_float=}, type {type(eps_float)}")
+    lprint(f"p  {p.data=}, type {type(p.data)}")
+    #assert False, 'check p'
+    grid = lambda meta: (triton.cdiv(total_size, meta['block_size']),)
+    k2 = kernel_noquant_single_step[grid](
+        p,   g,    exp_avg,    exp_avg_sq,    beta1,    beta2,    float_lr,
+        float_weight_decay,    eps_float,    step_float,    total_size,
         #_momentum_qmap, _momentum_midpoint_lut,
         #_variance_qmap, _variance_midpoint_lut,
         block_size,)
@@ -359,12 +372,12 @@ def kernel_noquant_single_step(
     g: tl.tensor,
     exp_avg: tl.tensor,
     exp_avg_sq: tl.tensor,
-    beta1, #: tl.constexpr,
-    beta2, #: tl.constexpr,
+    beta1: tl.constexpr,
+    beta2: tl.constexpr,
     lr: tl.constexpr,
     weight_decay: tl.constexpr,
     eps: tl.constexpr,
-    step, #: tl.constexpr,
+    step: tl.constexpr,
     total_size: tl.constexpr,
     block_size: tl.constexpr,
 ):
@@ -378,14 +391,14 @@ def kernel_noquant_single_step(
     g_val = tl.load(g+thread_offsets, mask=mask)
     p_val = tl.load(p+thread_offsets, mask=mask)
     exp_avg_val = tl.load(exp_avg+thread_offsets, mask=mask)
-    exp_avg_sqs_val = tl.load(exp_avg_sq+thread_offsets, mask=mask)
+    exp_avg_sq_val = tl.load(exp_avg_sq+thread_offsets, mask=mask)
 
     # AdamW update
     exp_avg_val = beta1 * exp_avg_val + (1 - beta1) * g_val
-    exp_avg_sqs_val = beta2 * exp_avg_sqs_val + (1 - beta2) * g_val * g_val
+    exp_avg_sqs_val = beta2 * exp_avg_sq_val + (1 - beta2) * g_val * g_val
 
-    correction1 = 1.0 - torch.pow(beta1, step)
-    correction2_sqrt = tl.sqrt(1.0 - torch.pow(beta2, step))
+    correction1 = 1.0 - (beta1**step)
+    correction2_sqrt = tl.sqrt(1.0 - (beta2**step))
 
     denom = (tl.sqrt(exp_avg_sq_val) / correction2_sqrt + eps) * correction1
     update = (exp_avg_val / denom) + (weight_decay * p_val)
