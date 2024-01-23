@@ -48,7 +48,7 @@ class TestAdamw4Bit_Optimizer:
         print(f"len model {len(model_orig_params)}")
         _size = 5
 
-        for i in range(1):
+        for i in range(5):
             adam_opt.zero_grad(set_to_none=True)
             fourbit_adamw_opt.zero_grad(set_to_none=True)
             inp = torch.randn(_size, _size, device=next(model.parameters()).device)
