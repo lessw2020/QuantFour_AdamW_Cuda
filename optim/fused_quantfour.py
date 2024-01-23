@@ -338,8 +338,9 @@ def fused_4bit_triton_wrapper_starter(p, p_num_elem, g, exp_avg, exp_avg_sq,
     #num_blocks = (p_num_elem + block_size - 1) // block_size
     grid = (num_blocks,)
     lprint(f"launching triton kernel itself {grid=}")
-    lprint(f"{g=}")
+    #lprint(f"{g=}")
 
+    lprint(f"exp_avg {exp_avg=}")
 
     k2 = kernel_noquant_single_step[(grid,)](
         p,   g,    exp_avg,    exp_avg_sq,    beta1,    beta2,    lr,
@@ -348,52 +349,52 @@ def fused_4bit_triton_wrapper_starter(p, p_num_elem, g, exp_avg, exp_avg_sq,
         #_variance_qmap, _variance_midpoint_lut,
         block_size,)
 
-    lprint(f"t_exp_avg {t_exp_avg=}")
+    lprint(f"exp_avg {exp_avg=}")
     assert False, 'check exp avg'
 
 
 @triton.jit
 def kernel_noquant_single_step(
-    p, # : tl.tensor,
-    g, # : tl.tensor,
+    p: tl.tensor,
+    g: tl.tensor,
     exp_avg: tl.tensor,
     exp_avg_sq: tl.tensor,
-    beta1: tl.constexpr,
-    beta2: tl.constexpr,
+    beta1, #: tl.constexpr,
+    beta2, #: tl.constexpr,
     lr: tl.constexpr,
     weight_decay: tl.constexpr,
     eps: tl.constexpr,
-    step: tl.constexpr,
+    step, #: tl.constexpr,
     total_size: tl.constexpr,
     block_size: tl.constexpr,
 ):
 
     pid = tl.program_id(0)
-    thread_offsets = pid * BLOCK_SIZE + tl.arange(0, BLOCK_SIZE)
+    thread_offsets = pid * block_size + tl.arange(0, block_size)
     mask = thread_offsets < total_size
+    tl.device_print("mask ", mask)
     # decoupled weight decay
     # param.mul_(1 - lr * weight_decay)
-    if tl.any(mask):
-        g_val = tl.load(g+thread_offsets, mask=mask)
-        p_val = tl.load(p+thread_offsets, mask=mask)
-        exp_avgs = tl.load(exp_avg+thread_offsets, mask=mask)
-        exp_avg_sqs = tl.load(exp_avg_sq+thread_offsets, mask=mask)
+    g_val = tl.load(g+thread_offsets, mask=mask)
+    p_val = tl.load(p+thread_offsets, mask=mask)
+    exp_avg_val = tl.load(exp_avg+thread_offsets, mask=mask)
+    exp_avg_sqs_val = tl.load(exp_avg_sq+thread_offsets, mask=mask)
 
-        # AdamW update
-        exp_avg_val = beta1 * exp_avg_val + (1 - beta1) * g_val
-        exp_avg_sq_val = beta2 * exp_avg_sq_val + (1 - beta2) * g_val * g_val
+    # AdamW update
+    exp_avg_val = beta1 * exp_avg_val + (1 - beta1) * g_val
+    exp_avg_sqs_val = beta2 * exp_avg_sqs_val + (1 - beta2) * g_val * g_val
 
-        correction1 = 1.0 - tl.pow(beta1, step)
-        correction2_sqrt = tl.sqrt(1.0 - tl.pow(beta2, step))
+    correction1 = 1.0 - torch.pow(beta1, step)
+    correction2_sqrt = tl.sqrt(1.0 - torch.pow(beta2, step))
 
-        denom = (tl.sqrt(exp_avg_sq_val) / correction2_sqrt + eps) * correction1
-        update = (exp_avg_val / denom) + (weight_decay * p_val)
-        p_val = p_val - (lr * update)
+    denom = (tl.sqrt(exp_avg_sq_val) / correction2_sqrt + eps) * correction1
+    update = (exp_avg_val / denom) + (weight_decay * p_val)
+    p_val = p_val - (lr * update)
 
-        # Store updated values back to memory
-        tl.store(p + global_id, p_val, mask=mask)
-        tl.store(exp_avg + global_id, exp_avg_val, mask=mask)
-        tl.store(exp_avg_sq + global_id, exp_avg_sq_val, mask=mask)
+    # Store updated values back to memory
+    tl.store(p + thread_offsets, p_val, mask=mask)
+    tl.store(exp_avg + thread_offsets, exp_avg_val, mask=mask)
+    tl.store(exp_avg_sq + thread_offsets, exp_avg_sq_val, mask=mask)
 
 
 
