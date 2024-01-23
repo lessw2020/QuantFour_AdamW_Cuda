@@ -468,6 +468,8 @@ def _single_tensor_step(
         # lprint(f"321: {denom=}")
         # weight update
         # lprint(f"323: {param=}")
+        # out = input + value * t1/t2
+
         param.addcdiv_(exp_avg, denom, value=-step_size)
         # lprint(f"325: after add cdiv {param=}")
 

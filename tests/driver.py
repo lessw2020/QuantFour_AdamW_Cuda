@@ -48,7 +48,7 @@ class TestAdamw4Bit_Optimizer:
         print(f"len model {len(model_orig_params)}")
         _size = 5
 
-        for i in range(2):
+        for i in range(1):
             adam_opt.zero_grad(set_to_none=True)
             fourbit_adamw_opt.zero_grad(set_to_none=True)
             inp = torch.randn(_size, _size, device=next(model.parameters()).device)
@@ -65,9 +65,9 @@ class TestAdamw4Bit_Optimizer:
                     #print(f"{p2[0:10]=}")
                 print(f"confirm modified params")
         # confirm we match AdamW at each step
-        #    for p1, p2 in zip(model.parameters(), model_clone.parameters()):
-        #        assert_expected(p1, p2)
-        #    print(f"quantfour matches adamw in step {i}")
+            for p1, p2 in zip(model.parameters(), model_clone.parameters()):
+                assert_expected(p1, p2)
+            print(f"quantfour matches adamw in step {i}")
 
 
 

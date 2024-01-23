@@ -320,6 +320,10 @@ class AdamWFused_QuantFour(torch.optim.Optimizer):
                     variance_meta[i]["max1"] = exp_avg_sq_scale
 
                     # ==== control math =============
+                    p2 = param.clone().detach()
+                    p2.mul_(1 - lr * weight_decay)
+
+
                     exp_avg2 = q_exp_avg.clone().detach()
                     exp_avg2_full = q_exp_avg.clone().detach()
 
@@ -345,6 +349,7 @@ class AdamWFused_QuantFour(torch.optim.Optimizer):
                     bias_corr2 = 1 - beta2**step
                     lprint(f"{step=}, {bias_corr1=}, {bias_corr2=}")
                     step_size = lr / bias_corr1
+                    #lprint(f"{step_size=}")
                     # correction1: 0.200 vs 0.19999999999
                     # correction2: 0.12 vs 0.346410
                     # if isinstance(bias_corr2, torch.Tensor):
@@ -357,7 +362,27 @@ class AdamWFused_QuantFour(torch.optim.Optimizer):
                     # lprint(f"321: {denom=}")
                     # weight update
                     # lprint(f"323: {param=}")
-                    #param.addcdiv_(exp_avg, denom, value=-step_size)
+                    p3 = p2.clone().detach()
+                    update = exp_avg2 / denom
+                    lprint(f"{update=}")
+                    '''
+                    pid (0, 0, 0) idx (  0) update: -0.199999
+pid (0, 0, 0) idx (  1) update: 0.199999
+pid (0, 0, 0) idx (  2) update: 0.199999
+pid (0, 0, 0) idx (  3) update: -0.199999
+pid (0, 0, 0) idx (  4) update: -0.199998
+pid (0, 0, 0) idx (  5) update: 0.200000
+pid (0, 0, 0) idx (  6) update: -0.200000
+pid (0, 0, 0) idx (  7) update: -0.200000
+pid (0, 0, 0) idx (  8) update: 0.200000
+pid (0, 0, 0) idx (  9) update: 0.200000
+pid (0, 0, 0) idx ( 10) update: 0.200000
+                    '''
+                    p2 = p2 - step_size * update
+                    p3.addcdiv_(exp_avg2, denom, value=-step_size)
+                    assert torch.allclose(p2, p3, atol=1e-04, rtol=1e-0)
+                    lprint(f"{p2=}, {p3=}")
+                    #assert False, 'next check'
                     # start fused kernel here....
                     assert param.is_cuda, f"param must be on cuda"
                     assert param.is_contiguous(), f"param must be contiguous"
@@ -376,7 +401,10 @@ class AdamWFused_QuantFour(torch.optim.Optimizer):
                     print(f"success with exp_avg! ")
                     assert torch.allclose(exp_avg_sq2, q_exp_avg_sq, atol=1e-04, rtol=1e-0)
                     print(f"success with exp_avg_sq! ")
-                    assert False, 'next check'
+                    lprint(f"{p2[0][0:5]=}, check main param: {param[0][0:5]=}")
+                    assert torch.allclose(p2, param, atol=1e-04, rtol=1e-0)
+                    print(f"success with param! ")
+                    assert False, 'end of step check'
 
 
 def fused_4bit_triton_wrapper_starter(p, p_num_elem, g, exp_avg, exp_avg_sq,
@@ -450,6 +478,9 @@ def kernel_noquant_single_step(
     exp_avg_sq_val = tl.load(exp_avg_sq+thread_offsets, mask=mask)
 
     # AdamW update
+    # delinked weight decay
+    p_val = p_val * (1 - lr * weight_decay)
+
     exp_avg_val = beta1 * exp_avg_val + (1 - beta1) * g_val
     #tl.device_print("after exp avg val ", exp_avg_val)
     exp_avg_sq_val = beta2 * exp_avg_sq_val + (1 - beta2) * g_val * g_val
@@ -458,12 +489,17 @@ def kernel_noquant_single_step(
     #tl.device_print("correction1 ", correction1)
     correction2_sqrt = tl.sqrt(1.0 - (beta2**step))
     #tl.device_print("correction2_sqrt ", correction2_sqrt)
-
+    step_size = lr / correction1
+    #tl.device_print("step size ", step_size)
     # denom = (exp_avg_sq2.sqrt() / bias_corr2_sqrt).add_(eps)
     denom = ((tl.sqrt(exp_avg_sq_val) / correction2_sqrt) + eps) # * correction1
-    tl.device_print("denom ", denom)
-    update = (exp_avg_val / denom) + (weight_decay * p_val)
-    p_val = p_val - (lr * update)
+    # tl.device_print("denom ", denom)
+
+
+    update = (exp_avg_val / denom) #+ (weight_decay * p_val)
+    tl.device_print("update ", update)
+    # weight update
+    p_val = p_val - step_size * update
 
     # Store updated values back to memory
     tl.store(p + thread_offsets, p_val, mask=mask)
