@@ -15,7 +15,7 @@ sys.path.append("..")
 
 from utils_test import assert_expected, gpu_test, set_rng_seed
 
-from optim.adamw_fourbit_triton import AdamW_QuantFour
+from optim.fused_quantfour import AdamWFused_QuantFour
 
 @pytest.fixture(autouse=True)
 def random():
@@ -31,7 +31,7 @@ class TestAdamw4Bit_Optimizer:
         adam_opt = torch_optim.AdamW(
             model_clone.parameters(), betas=betas, weight_decay=weight_decay
         )
-        fourbit_adamw_opt = AdamW_QuantFour(
+        fourbit_adamw_opt = AdamWFused_QuantFour(
             model.parameters(),
             betas=betas,
             weight_decay=weight_decay)

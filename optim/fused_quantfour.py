@@ -155,7 +155,7 @@ class AdamWFused_QuantFour(torch.optim.Optimizer):
         if not 0.0 <= weight_decay:
             raise ValueError(f"Invalid weight_decay value: {weight_decay=}")
 
-        self.param_quant_threshold = 128
+        self.param_quant_threshold = 2 # 128
 
         defaults = dict(
             lr=lr,
@@ -177,7 +177,7 @@ class AdamWFused_QuantFour(torch.optim.Optimizer):
             "overhead": dict(),
             "qmap": None,
         }
-        subconfig = self.get_subqconfig(state_name)
+        #subconfig = self.get_subqconfig(state_name)
         state[field]["enable"] = enable_param_quantization(p, self.param_quant_threshold)
 
 
@@ -294,10 +294,10 @@ class AdamWFused_QuantFour(torch.optim.Optimizer):
                 step_t += 1
 
                 if momentum_quant_enabled[i]:
-                    p_numel = param.numel()
+                    p_num_elem = param.numel()
 
-                    bytelength = (p_numel + 1) // 2
-                    blocks = (p_numel() + 127) // 128
+                    bytelength = (p_num_elem + 1) // 2
+                    blocks = (p_num_elem + 127) // 128
 
                     if q_exp_avg.numel() <= 1:
                         q_exp_avg.data = torch.zeros((bytelength,), dtype=torch.int8, device=param.device)
@@ -306,23 +306,23 @@ class AdamWFused_QuantFour(torch.optim.Optimizer):
 
 
                     exp_avg_scale = torch.zeros((blocks,), dtype=torch.float32, device=param.device)
-                    exp_avgs_q_overhead[i]["max1"] = exp_avg_scale
+                    momentum_meta[i]["max1"] = exp_avg_scale
 
 
                     exp_avg_sq_scale = torch.zeros((blocks,), dtype=torch.float32, device=param.device)
-                    exp_avg_sqs_q_overhead[i]["max1"] = exp_avg_sq_scale
+                    variance_meta[i]["max1"] = exp_avg_sq_scale
 
                     # start fused kernel here....
-                    assert p.is_cuda(), f"param must be on cuda"
-                    assert p.is_contiguous(), f"param must be contiguous"
-                    p_num_elem = p.numel()
+                    assert param.is_cuda, f"param must be on cuda"
+                    assert param.is_contiguous(), f"param must be contiguous"
+                    p_num_elem = param.numel()
                     # verify params numel matches relevant partners numel
-                    assert exp_avg.numel() == p_num_elem, f"exp_avg numel {exp_avg.numel()} != param numel {num_elem}"
-                    assert exp_avg_sq.numel() == p_num_elem, f"exp_avg_sq numel {exp_avg_sq.numel()} != param numel {num_elem}"
-                    assert grad.numel() == p_num_elem, f"grad numel {grad.numel()} != param numel {num_elem}"
+                    assert q_exp_avg.numel() == p_num_elem, f"exp_avg numel {q_exp_avg.numel()} != param numel {p_num_elem}"
+                    assert q_exp_avg_sq.numel() == p_num_elem, f"exp_avg_sq numel {q_exp_avg_sq.numel()} != param numel {p_num_elem}"
+                    assert grad.numel() == p_num_elem, f"grad numel {grad.numel()} != param numel {p_num_elem}"
 
-
-                    fused_4bit_triton_wrapper_starter(p, p_num_elem, grads, exp_avg, exp_avg_sq,
+                    lprint(f"calling triton fused kernel {p_num_elem}")
+                    fused_4bit_triton_wrapper_starter(param, p_num_elem, grads, exp_avg, exp_avg_sq,
                                     beta1, beta2, lr, weight_decay, eps, step)
 
 
