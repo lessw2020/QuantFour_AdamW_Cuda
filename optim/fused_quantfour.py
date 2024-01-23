@@ -288,21 +288,22 @@ class AdamWFused_QuantFour(torch.optim.Optimizer):
                 grad = grads[i]
                 q_exp_avg = exp_avgs[i]
                 q_exp_avg_sq = exp_avg_sqs[i]
-                step_t = state_steps[i]
+                t_step = state_steps[i]
 
                 # update step
-                step_t += 1
+                t_step += 1
 
                 if momentum_quant_enabled[i]:
                     p_num_elem = param.numel()
 
-                    bytelength = (p_num_elem + 1) // 2
+                    bytelength = p_num_elem # todo - undo this.... (p_num_elem + 1) // 2
                     blocks = (p_num_elem + 127) // 128
+                    curr_dtype = torch.float32
 
                     if q_exp_avg.numel() <= 1:
-                        q_exp_avg.data = torch.zeros((bytelength,), dtype=torch.int8, device=param.device)
+                        q_exp_avg.data = torch.zeros((bytelength,), dtype=curr_dtype, device=param.device)
                     if q_exp_avg_sq.numel() <= 1:
-                        q_exp_avg_sq.data = torch.zeros((bytelength,), dtype=torch.int8, device=param.device)
+                        q_exp_avg_sq.data = torch.zeros((bytelength,), dtype=curr_dtype, device=param.device)
 
 
                     exp_avg_scale = torch.zeros((blocks,), dtype=torch.float32, device=param.device)
@@ -321,12 +322,13 @@ class AdamWFused_QuantFour(torch.optim.Optimizer):
                     assert q_exp_avg_sq.numel() == p_num_elem, f"exp_avg_sq numel {q_exp_avg_sq.numel()} != param numel {p_num_elem}"
                     assert grad.numel() == p_num_elem, f"grad numel {grad.numel()} != param numel {p_num_elem}"
 
-                    lprint(f"calling triton fused kernel {p_num_elem}")
-                    fused_4bit_triton_wrapper_starter(param, p_num_elem, grads, exp_avg, exp_avg_sq,
-                                    beta1, beta2, lr, weight_decay, eps, step)
+                    #lprint(f"calling triton fused kernel {q_exp_avg=}, {q_exp_avg_sq=}, {grad=}, {param=}, {t_step=}, {beta1=},")
+
+                    fused_4bit_triton_wrapper_starter(param, p_num_elem, grad, q_exp_avg, q_exp_avg_sq,
+                                    beta1, beta2, lr, weight_decay, eps, t_step)
 
 
-def fused_4bit_triton_wrapper_starter(p, p_num_elem, grads, exp_avg, exp_avg_sq,
+def fused_4bit_triton_wrapper_starter(p, p_num_elem, g, exp_avg, exp_avg_sq,
                                     beta1, beta2, lr, weight_decay, eps, step):
     # prep and launch triton kernel
     # assert p_numel < maxof int32
@@ -335,6 +337,9 @@ def fused_4bit_triton_wrapper_starter(p, p_num_elem, grads, exp_avg, exp_avg_sq,
     num_blocks = (total_size + block_size - 1) // block_size
     #num_blocks = (p_num_elem + block_size - 1) // block_size
     grid = (num_blocks,)
+    lprint(f"launching triton kernel itself {grid=}")
+    lprint(f"{g=}")
+
 
     k2 = kernel_noquant_single_step[(grid,)](
         p,   g,    exp_avg,    exp_avg_sq,    beta1,    beta2,    lr,
@@ -343,10 +348,14 @@ def fused_4bit_triton_wrapper_starter(p, p_num_elem, grads, exp_avg, exp_avg_sq,
         #_variance_qmap, _variance_midpoint_lut,
         block_size,)
 
+    lprint(f"t_exp_avg {t_exp_avg=}")
+    assert False, 'check exp avg'
+
+
 @triton.jit
 def kernel_noquant_single_step(
-    p: tl.tensor,
-    g: tl.tensor,
+    p, # : tl.tensor,
+    g, # : tl.tensor,
     exp_avg: tl.tensor,
     exp_avg_sq: tl.tensor,
     beta1: tl.constexpr,
@@ -356,6 +365,7 @@ def kernel_noquant_single_step(
     eps: tl.constexpr,
     step: tl.constexpr,
     total_size: tl.constexpr,
+    block_size: tl.constexpr,
 ):
 
     pid = tl.program_id(0)
