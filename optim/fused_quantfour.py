@@ -279,9 +279,10 @@ class AdamWFused_QuantFour(torch.optim.Optimizer):
 
             # settings
 
-            lr=group["lr"],
-            weight_decay=group["weight_decay"],
-            eps=group["eps"],
+            lr=group["lr"]
+            weight_decay=group["weight_decay"]
+            eps=group["eps"]
+
 
             # step processing
             for i, param in enumerate(params_with_grad):
@@ -301,10 +302,15 @@ class AdamWFused_QuantFour(torch.optim.Optimizer):
                     curr_dtype = torch.float32
 
                     if q_exp_avg.numel() <= 1:
-                        q_exp_avg.data = torch.zeros((bytelength,), dtype=curr_dtype, device=param.device)
+                        q_exp_avg.data = exp_avg = torch.zeros_like(
+                        param, memory_format=torch.preserve_format
+                        )
+                        #q_exp_avg.data = torch.zeros((bytelength,), dtype=curr_dtype, device=param.device)
                     if q_exp_avg_sq.numel() <= 1:
-                        q_exp_avg_sq.data = torch.zeros((bytelength,), dtype=curr_dtype, device=param.device)
-
+                        # q_exp_avg_sq.data = torch.zeros((bytelength,), dtype=curr_dtype, device=param.device)
+                        q_exp_avg_sq.data = exp_avg_sq = torch.zeros_like(
+                        param, memory_format=torch.preserve_format
+                        )
 
                     exp_avg_scale = torch.zeros((blocks,), dtype=torch.float32, device=param.device)
                     momentum_meta[i]["max1"] = exp_avg_scale
@@ -313,6 +319,41 @@ class AdamWFused_QuantFour(torch.optim.Optimizer):
                     exp_avg_sq_scale = torch.zeros((blocks,), dtype=torch.float32, device=param.device)
                     variance_meta[i]["max1"] = exp_avg_sq_scale
 
+                    # ==== control math =============
+                    exp_avg2 = q_exp_avg.clone().detach()
+                    exp_avg2_full = q_exp_avg.clone().detach()
+
+                    lprint(f"{exp_avg2.shape=}, {grad.shape=}")
+                    exp_avg_sq2 = q_exp_avg_sq.clone().detach()
+                    lprint(f"{grad.shape=}")
+                    exp_avg2.lerp_(grad, 1 - beta1)
+                    exp_avg2_full = beta1 * exp_avg2 + (1 - beta1) * grad
+                    torch.allclose(exp_avg2, exp_avg2_full, atol=1e-04, rtol=1e-0)
+
+
+                    #exp_avg_val = beta1 * exp_avg_val + (1 - beta1) * g_val
+
+
+                    lprint(f"expv update: {exp_avg2=}")
+                    #lprint(f"{step_t=}, check first: {exp_avg2=}")
+
+                    exp_avg_sq2.mul_(beta2).addcmul_(grad, grad, value=1 - beta2)
+
+                    step = t_step.item()
+                    bias_corr1 = 1 - beta1**step
+                    bias_corr2 = 1 - beta2**step
+                    step_size = lr / bias_corr1
+                    # if isinstance(bias_corr2, torch.Tensor):
+                    #    bias_corr2_sqrt = bias_corr2.sqrt()
+                    # else:
+                    bias_corr2_sqrt = math.sqrt(bias_corr2)
+
+                    denom = (exp_avg_sq2.sqrt() / bias_corr2_sqrt).add_(eps)
+                    lprint(f"321: {denom=}")
+                    # lprint(f"321: {denom=}")
+                    # weight update
+                    # lprint(f"323: {param=}")
+                    #param.addcdiv_(exp_avg, denom, value=-step_size)
                     # start fused kernel here....
                     assert param.is_cuda, f"param must be on cuda"
                     assert param.is_contiguous(), f"param must be contiguous"
@@ -327,6 +368,10 @@ class AdamWFused_QuantFour(torch.optim.Optimizer):
                     fused_4bit_triton_wrapper_starter(param, p_num_elem, grad, q_exp_avg, q_exp_avg_sq,
                                     beta1, beta2, lr, weight_decay, eps, t_step)
 
+                    assert torch.allclose(exp_avg2, q_exp_avg, atol=1e-04, rtol=1e-0)
+                    print(f"success with exp_avg! ")
+                    assert False, 'next check'
+
 
 def fused_4bit_triton_wrapper_starter(p, p_num_elem, g, exp_avg, exp_avg_sq,
                                     beta1, beta2, lr, weight_decay, eps, step):
@@ -340,10 +385,10 @@ def fused_4bit_triton_wrapper_starter(p, p_num_elem, g, exp_avg, exp_avg_sq,
     lprint(f"launching triton kernel itself {grid=}")
     #lprint(f"{g=}")
 
-    lprint(f"beta1 {beta1=}, type {type(beta1)}")
+    '''lprint(f"beta1 {beta1=}, type {type(beta1)}")
     lprint(f"beta2 {beta2=}, type {type(beta2)}")
     lprint(f"step {step=}, type {type(step)}")
-    step_float = float(step.item())
+
     lprint(f"step_float {step_float=}, type {type(step_float)}")
     lprint(f"lr {lr=}, type {type(lr)}")
     float_lr = float(lr[0])
@@ -354,16 +399,20 @@ def fused_4bit_triton_wrapper_starter(p, p_num_elem, g, exp_avg, exp_avg_sq,
     lprint(f"eps_float {eps_float=}, type {type(eps_float)}")
     lprint(f"p  {p.data=}, type {type(p.data)}")
     #assert False, 'check p'
+    '''
+    step_float = float(step.item())
+
     grid = lambda meta: (triton.cdiv(total_size, meta['block_size']),)
     k2 = kernel_noquant_single_step[grid](
-        p,   g,    exp_avg,    exp_avg_sq,    beta1,    beta2,    float_lr,
-        float_weight_decay,    eps_float,    step_float,    total_size,
+        p,   g,    exp_avg,    exp_avg_sq,    beta1,    beta2,    lr,
+        weight_decay,    eps,    step_float,    total_size,
         #_momentum_qmap, _momentum_midpoint_lut,
         #_variance_qmap, _variance_midpoint_lut,
         block_size,)
 
     lprint(f"exp_avg {exp_avg=}")
-    assert False, 'check exp avg'
+    #lprint(f"exp_avg_sq {exp_avg_sq=}")
+    # assert False, 'check exp avg'
 
 
 @triton.jit
@@ -385,17 +434,19 @@ def kernel_noquant_single_step(
     pid = tl.program_id(0)
     thread_offsets = pid * block_size + tl.arange(0, block_size)
     mask = thread_offsets < total_size
-    tl.device_print("mask ", mask)
+
     # decoupled weight decay
     # param.mul_(1 - lr * weight_decay)
     g_val = tl.load(g+thread_offsets, mask=mask)
     p_val = tl.load(p+thread_offsets, mask=mask)
     exp_avg_val = tl.load(exp_avg+thread_offsets, mask=mask)
+    tl.device_print("exp avg val ", exp_avg_val)
     exp_avg_sq_val = tl.load(exp_avg_sq+thread_offsets, mask=mask)
 
     # AdamW update
     exp_avg_val = beta1 * exp_avg_val + (1 - beta1) * g_val
-    exp_avg_sqs_val = beta2 * exp_avg_sq_val + (1 - beta2) * g_val * g_val
+    tl.device_print("after exp avg val ", exp_avg_val)
+    exp_avg_sq_val = beta2 * exp_avg_sq_val + (1 - beta2) * g_val * g_val
 
     correction1 = 1.0 - (beta1**step)
     correction2_sqrt = tl.sqrt(1.0 - (beta2**step))
