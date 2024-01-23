@@ -339,10 +339,14 @@ class AdamWFused_QuantFour(torch.optim.Optimizer):
 
                     exp_avg_sq2.mul_(beta2).addcmul_(grad, grad, value=1 - beta2)
 
+
                     step = t_step.item()
                     bias_corr1 = 1 - beta1**step
                     bias_corr2 = 1 - beta2**step
+                    lprint(f"{step=}, {bias_corr1=}, {bias_corr2=}")
                     step_size = lr / bias_corr1
+                    # correction1: 0.200 vs 0.19999999999
+                    # correction2: 0.12 vs 0.346410
                     # if isinstance(bias_corr2, torch.Tensor):
                     #    bias_corr2_sqrt = bias_corr2.sqrt()
                     # else:
@@ -370,6 +374,8 @@ class AdamWFused_QuantFour(torch.optim.Optimizer):
 
                     assert torch.allclose(exp_avg2, q_exp_avg, atol=1e-04, rtol=1e-0)
                     print(f"success with exp_avg! ")
+                    assert torch.allclose(exp_avg_sq2, q_exp_avg_sq, atol=1e-04, rtol=1e-0)
+                    print(f"success with exp_avg_sq! ")
                     assert False, 'next check'
 
 
@@ -440,18 +446,22 @@ def kernel_noquant_single_step(
     g_val = tl.load(g+thread_offsets, mask=mask)
     p_val = tl.load(p+thread_offsets, mask=mask)
     exp_avg_val = tl.load(exp_avg+thread_offsets, mask=mask)
-    tl.device_print("exp avg val ", exp_avg_val)
+    #tl.device_print("exp avg val ", exp_avg_val)
     exp_avg_sq_val = tl.load(exp_avg_sq+thread_offsets, mask=mask)
 
     # AdamW update
     exp_avg_val = beta1 * exp_avg_val + (1 - beta1) * g_val
-    tl.device_print("after exp avg val ", exp_avg_val)
+    #tl.device_print("after exp avg val ", exp_avg_val)
     exp_avg_sq_val = beta2 * exp_avg_sq_val + (1 - beta2) * g_val * g_val
 
     correction1 = 1.0 - (beta1**step)
+    #tl.device_print("correction1 ", correction1)
     correction2_sqrt = tl.sqrt(1.0 - (beta2**step))
+    #tl.device_print("correction2_sqrt ", correction2_sqrt)
 
-    denom = (tl.sqrt(exp_avg_sq_val) / correction2_sqrt + eps) * correction1
+    # denom = (exp_avg_sq2.sqrt() / bias_corr2_sqrt).add_(eps)
+    denom = ((tl.sqrt(exp_avg_sq_val) / correction2_sqrt) + eps) # * correction1
+    tl.device_print("denom ", denom)
     update = (exp_avg_val / denom) + (weight_decay * p_val)
     p_val = p_val - (lr * update)
 
