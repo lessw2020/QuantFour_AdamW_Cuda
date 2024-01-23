@@ -8,6 +8,9 @@ from torch import Tensor
 import sys
 from .quant_opt_base import create_dynamic_map, create_pow_map, create_qmap
 
+import triton
+import triton.language as tl
+
 __all__ = ["AdamW_Fused_QuantFour"]
 
 def lprint(msg=""):
@@ -319,15 +322,78 @@ class AdamWFused_QuantFour(torch.optim.Optimizer):
                     assert grad.numel() == p_num_elem, f"grad numel {grad.numel()} != param numel {num_elem}"
 
 
-                    fused_4bit_triton_wrapper(p, p_num_elem, grads, exp_avg, exp_avg_sq,
+                    fused_4bit_triton_wrapper_starter(p, p_num_elem, grads, exp_avg, exp_avg_sq,
                                     beta1, beta2, lr, weight_decay, eps, step)
+
+
+def fused_4bit_triton_wrapper_starter(p, p_num_elem, grads, exp_avg, exp_avg_sq,
+                                    beta1, beta2, lr, weight_decay, eps, step):
+    # prep and launch triton kernel
+    # assert p_numel < maxof int32
+    block_size = 128
+    total_size = p_num_elem
+    num_blocks = (total_size + block_size - 1) // block_size
+    #num_blocks = (p_num_elem + block_size - 1) // block_size
+    grid = (num_blocks,)
+
+    k2 = kernel_noquant_single_step[(grid,)](
+        p,   g,    exp_avg,    exp_avg_sq,    beta1,    beta2,    lr,
+        weight_decay,    eps,    step,    total_size,
+        #_momentum_qmap, _momentum_midpoint_lut,
+        #_variance_qmap, _variance_midpoint_lut,
+        block_size,)
+
+@triton.jit
+def kernel_noquant_single_step(
+    p: tl.tensor,
+    g: tl.tensor,
+    exp_avg: tl.tensor,
+    exp_avg_sq: tl.tensor,
+    beta1: tl.constexpr,
+    beta2: tl.constexpr,
+    lr: tl.constexpr,
+    weight_decay: tl.constexpr,
+    eps: tl.constexpr,
+    step: tl.constexpr,
+    total_size: tl.constexpr,
+):
+
+    pid = tl.program_id(0)
+    thread_offsets = pid * BLOCK_SIZE + tl.arange(0, BLOCK_SIZE)
+    mask = thread_offsets < total_size
+    # decoupled weight decay
+    # param.mul_(1 - lr * weight_decay)
+    if tl.any(mask):
+        g_val = tl.load(g+thread_offsets, mask=mask)
+        p_val = tl.load(p+thread_offsets, mask=mask)
+        exp_avgs = tl.load(exp_avg+thread_offsets, mask=mask)
+        exp_avg_sqs = tl.load(exp_avg_sq+thread_offsets, mask=mask)
+
+        # AdamW update
+        exp_avg_val = beta1 * exp_avg_val + (1 - beta1) * g_val
+        exp_avg_sq_val = beta2 * exp_avg_sq_val + (1 - beta2) * g_val * g_val
+
+        correction1 = 1.0 - tl.pow(beta1, step)
+        correction2_sqrt = tl.sqrt(1.0 - tl.pow(beta2, step))
+
+        denom = (tl.sqrt(exp_avg_sq_val) / correction2_sqrt + eps) * correction1
+        update = (exp_avg_val / denom) + (weight_decay * p_val)
+        p_val = p_val - (lr * update)
+
+        # Store updated values back to memory
+        tl.store(p + global_id, p_val, mask=mask)
+        tl.store(exp_avg + global_id, exp_avg_val, mask=mask)
+        tl.store(exp_avg_sq + global_id, exp_avg_sq_val, mask=mask)
+
+
+
 
 
 def fused_4bit_triton_wrapper(p, p_num_elem, g, exp_avg, exp_avg_sq,
                                 beta1, beta2, lr, weight_decay, eps, step):
     # prep and launch triton kernel
     # assert p_numel < maxof int32
-    block_size = 128
+    block_size = 128 / 2  # 128 / 2 = 64, b/c we are packing 2 per int8...
     num_blocks = (p_num_elem + block_size - 1) // block_size
     grid = (num_blocks,)
     k2 = kernel_single_step[(grid,)](
@@ -338,8 +404,7 @@ def fused_4bit_triton_wrapper(p, p_num_elem, g, exp_avg, exp_avg_sq,
         block_size,)
 
 
-import triton
-import triton.language as tl
+
 @triton.jit
 def kernel_single_step(
     p: tl.tensor,
@@ -362,13 +427,13 @@ def kernel_single_step(
     pid = tl.program_id(0)
     global_id = pid * BLOCK_SIZE + tl.arange(0, BLOCK_SIZE)
     scale_id = pid
-    working_id0 = global_id << 1
-    working_id1 = (global_id << 1) + 1
+    working_id0 = global_id << 1  # 2x the working id
+    working_id1 = (global_id << 1) + 1 # 2x+1 the working id
 
     correction1 = 1.0 - tl.pow(beta1, step)
     correction2_sqrt = tl.sqrt(1.0 - tl.pow(beta2, step))
 
-    mask = (1 << 4) - 1
+    mask = (1 << 4) - 1  # 00001111
 
     if working_id0 < p_num_elem:
         exp_avg_idx0 = exp_avg[global_id] & mask
@@ -388,6 +453,7 @@ def kernel_single_step(
         tl.atomic_max(ABS_MAX_SQ, 0, local_absmax_exp_avg_sq)
 
     if working_id1 < p_num_elem:
+        exp_avg_idx1 = exp_avg[global_id] & mask
         # Similar logic for working_id1
         pass
 
