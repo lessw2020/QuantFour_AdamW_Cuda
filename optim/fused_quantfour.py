@@ -413,7 +413,18 @@ def fused_4bit_triton_wrapper_starter(p, p_num_elem, g, exp_avg, exp_avg_sq,
         block_size,)
 
 
+@triton.jit
+def atomic_max_nonneg_kernel(data, value, output, block_size: tl.constexpr):
+    pid = tl.program_id(0)
+    offset = pid * block_size + tl.arange(0, block_size)
 
+    old_value = tl.load(data + offset)
+
+    # Compute the maximum non-negatively
+    new_value = tl.where(value > old_value, value, old_value)
+
+    old_value = tl.atomic_max(data + offset, new_value)
+    tl.store(output + offset, old_value)
 
 @triton.jit
 def kernel_noquant_single_step(
