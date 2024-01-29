@@ -10,6 +10,7 @@ from .quant_opt_base import create_dynamic_map, create_pow_map, create_qmap
 
 import triton
 import triton.language as tl
+from q_binary_search import q_mapping_kernel
 
 __all__ = ["AdamW_Fused_QuantFour"]
 
@@ -474,6 +475,8 @@ def kernel_noquant_single_step(
     tl.store(p + thread_offsets, p_val, mask=mask)
     tl.store(exp_avg + thread_offsets, exp_avg_val, mask=mask)
     tl.store(exp_avg_sq + thread_offsets, exp_avg_sq_val, mask=mask)
+
+    #test quant
 
 
 def fused_4bit_triton_wrapper(p, p_num_elem, g, exp_avg, exp_avg_sq,
