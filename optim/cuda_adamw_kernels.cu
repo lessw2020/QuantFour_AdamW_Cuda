@@ -67,13 +67,29 @@ __global__ void kernel_cuda_single_tensor(
         const int global_id = blockIdx.x * blockDim.x + threadIdx.x;
         if (global_id >= total_size) return;
 
-        exp_avg[global_id] = beta1 * exp_avg[global_id] + (1 - beta1) * g[global_id];
-        exp_avg_sq[global_id] = beta2 * exp_avg_sq[global_id] + (1 - beta2) * g[global_id] * g[global_id];
+        float curr_grad = g[global_id];
+
+        //decoupled weight decay
+        p[global_id] = p[global_id] * (1 - lr * weight_decay)
+
+
+        exp_avg[global_id] = beta1 * exp_avg[global_id] + (1 - beta1) * curr_grad;
+        exp_avg_sq[global_id] = beta2 * exp_avg_sq[global_id] + (1 - beta2) * (curr_grad * curr_grad);
 
         const float correction1 = 1.0f - powf(beta1, step);
         const float correction2_sqrt = sqrtf(1.0f - powf(beta2, step));
+        float step_size = lr / correction1
+        /*
 
-        float denom = (sqrtf(exp_avg_sq[global_id]) / correction2_sqrt + eps) * correction1;
-        float update = (exp_avg[global_id]/denom) + (weight_decay * p[global_id]);
-        p[global_id] = p[global_id] - (lr * update);
+        step_size = lr / correction1
+        denom = ((tl.sqrt(exp_avg_sq_val) / correction2_sqrt) + eps) # * correction1
+        update = (exp_avg_val / denom)
+        # weight update
+        p_val = p_val - step_size * update
+
+        */
+
+        float denom = (sqrtf(exp_avg_sq[global_id]) / correction2_sqrt + eps); // * correction1;
+        float update = (exp_avg[global_id]/denom); // + (weight_decay * p[global_id]);
+        p[global_id] = p[global_id] - (step_size * update);
 }
