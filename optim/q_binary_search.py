@@ -11,12 +11,51 @@ def q_mapping_kernel(qmap, qmap_midpoints, x, output, block_size: tl.constexpr):
     if pid >= block_size:
         return
 
-    lo = 0
-    hi = 16
+    x_offsets = tl.arange(0, block_size)
+    x_vals = tl.load(x + x_offsets, mask = x_offsets < block_size)
+    tl.device_print("x_vals ", x_vals)
+    return
+    """
+    qmap_vals = tl.tensor(
+            [
+                -0.8875,
+                -0.6625,
+                -0.4375,
+                -0.2125,
+                -0.0775,
+                -0.0325,
+                -0.0055,
+                0.0000,
+                0.0055,
+                0.0325,
+                0.0775,
+                0.2125,
+                0.4375,
+                0.6625,
+                0.8875,
+                1.0000,
 
+            ],
+            type=tl.float16,
+        )
+
+    lo = 0
+    hi = 15
+
+    #qmap_offsets = tl.arange(0, 16)
+    #qmap_vals = tl.load(qmap + qmap_offsets) #, mask = )
+    #qmap_midpoints = tl.load(qmap_midpoints + qmap_offsets-1)
+
+    #tl.device_print("qmap ", qmap_vals)
+    #tl.device_print("qmap_midpoints ", qmap_midpoints)
     # Use Triton's memory load function
-    qmap_lo = tl.load(qmap + lo)
-    qmap_hi = tl.load(qmap + hi - 1)
+    #qmap_lo = qmap_vals[lo]
+    #qmap_hi = qmap_vals[hi]
+    #tl.device_print("lo ", qmap_lo)
+    #tl.device_print("high ", qmap_hi)
+    return
+    """
+    """
 
     if x[pid] <= qmap_lo:
         output[pid] = lo
@@ -37,3 +76,4 @@ def q_mapping_kernel(qmap, qmap_midpoints, x, output, block_size: tl.constexpr):
     mid_val = tl.load(qmap_midpoints[lo - 1])
     rank = tl.where(mid_val < x[pid], lo, lo - 1)
     output[pid] = rank
+    """

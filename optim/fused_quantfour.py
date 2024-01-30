@@ -10,7 +10,7 @@ from .quant_opt_base import create_dynamic_map, create_pow_map, create_qmap
 
 import triton
 import triton.language as tl
-from q_binary_search import q_mapping_kernel
+from .q_binary_search import q_mapping_kernel
 
 __all__ = ["AdamW_Fused_QuantFour"]
 
@@ -412,7 +412,32 @@ def fused_4bit_triton_wrapper_starter(p, p_num_elem, g, exp_avg, exp_avg_sq,
         #_momentum_qmap, _momentum_midpoint_lut,
         #_variance_qmap, _variance_midpoint_lut,
         block_size,)
+    out_exp_avg = torch.zeros_like(exp_avg)
+    assert exp_avg.is_cuda, f"exp_avg must be on cuda"
+    _momentum_qmap.to('cuda')
+    _momentum_midpoint_lut.to('cuda')
+    k3 = q_in_mapping_kernel[(128,)](exp_avg, out_exp_avg, block_size)
+    print(f"{out_exp_avg=}")
+    # qmap, qmap_midpoints, x, output, block_size: tl.constexpr
+    assert False, "stop"
 
+
+@triton.jit
+def q_in_mapping_kernel(x, output, block_size: tl.constexpr):
+    pid = tl.program_id(0)
+    # Guard to ensure we don't go out of bounds
+    if pid >= block_size:
+        return
+
+    x_offsets = tl.arange(0, block_size)
+    x_vals = tl.load(x + x_offsets, mask = x_offsets < block_size)
+    myval = x_vals[0]
+    if myval >0:
+        tl.device_print('over 0')
+    else:
+        tl.device_print('under 0')
+    #tl.device_print(myval)
+    return
 
 @triton.jit
 def atomic_max_nonneg_kernel(data, value, output, block_size: tl.constexpr):
@@ -476,7 +501,7 @@ def kernel_noquant_single_step(
     tl.store(exp_avg + thread_offsets, exp_avg_val, mask=mask)
     tl.store(exp_avg_sq + thread_offsets, exp_avg_sq_val, mask=mask)
 
-    #test quant
+
 
 
 def fused_4bit_triton_wrapper(p, p_num_elem, g, exp_avg, exp_avg_sq,
@@ -492,6 +517,8 @@ def fused_4bit_triton_wrapper(p, p_num_elem, g, exp_avg, exp_avg_sq,
         _momentum_qmap, _momentum_midpoint_lut,
         _variance_qmap, _variance_midpoint_lut,
         block_size,)
+    print(f"launching triton kernel itself {grid=}")
+    assert False, "inst"
 
 
 
