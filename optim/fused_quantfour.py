@@ -11,6 +11,7 @@ from .quant_opt_base import create_dynamic_map, create_pow_map, create_qmap
 import triton
 import triton.language as tl
 from .q_binary_search import q_mapping_kernel
+from quantfour_cuda import fused_single_tensor
 
 __all__ = ["AdamW_Fused_QuantFour"]
 
@@ -378,8 +379,13 @@ class AdamWFused_QuantFour(torch.optim.Optimizer):
 
                     #lprint(f"calling triton fused kernel {q_exp_avg=}, {q_exp_avg_sq=}, {grad=}, {param=}, {t_step=}, {beta1=},")
 
-                    fused_4bit_triton_wrapper_starter(param, p_num_elem, grad, q_exp_avg, q_exp_avg_sq,
-                                    beta1, beta2, lr, weight_decay, eps, t_step)
+                    #fused_4bit_triton_wrapper_starter(param, p_num_elem, grad, q_exp_avg, q_exp_avg_sq,
+                    #                beta1, beta2, lr, weight_decay, eps, t_step)
+
+                    fused_single_tensor(param, grad, q_exp_avg, q_exp_avg_sq,
+                                beta1, beta2, lr, weight_decay, eps, t_step)
+                    # p, g, exp_avg, exp_avg_sq,
+                    # beta1, beta2, lr, weight_decay, eps, step
 
                     assert torch.allclose(exp_avg2, q_exp_avg, atol=1e-04, rtol=1e-0)
                     print(f"success with exp_avg! ")

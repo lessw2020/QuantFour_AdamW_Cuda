@@ -13,42 +13,6 @@
 
 using torch::Tensor;
 
-void cuda_fused_single_tensor(Tensor& p, Tensor& g, Tensor& exp_avg, Tensor& exp_avg_sq,
-                      float beta1, float beta2, float lr, float weight_decay, float eps, float step) {
-    // Get tensor size
-    int total_size = p.numel();
-    AT_ASSERTM(at::cuda::detail::canUse32BitIndexMath(p),
-              "parameter tensor is too large to be indexed with int32");
-
-    const int block_dim = 128;
-    int grid_dim = ((total_size + block_dim - 1) / block_dim);
-    const dim3 blocks(grid_dim);
-
-    AT_DISPATCH_FLOATING_TYPES_AND_HALF(p.scalar_type(), "kernel_cuda_single_tensor", ([&] {
-        adamw_cuda_kernel<scalar_t><<<blocks, block_dim>>>(
-            p.data_ptr<scalar_t>(),
-            g.data_ptr<scalar_t>(),
-            exp_avg.data_ptr<scalar_t>(),
-            exp_avg_sq.data_ptr<scalar_t>(),
-            beta1,
-            beta2,
-            lr,
-            weight_decay,
-            eps,
-            step,
-            total_size
-        );
-    }));
-
-    AT_CUDA_CHECK(cudaGetLastError());
-}
-
-
-__device__ __forceinline__ float atomicMax(float * addr, float value) {
-
-    return __int_as_float(atomicMax((int *)addr, __float_as_int(value)));
-}
-
 template <typename T>
 __global__ void kernel_cuda_single_tensor(
         T* __restrict__ p,
@@ -70,7 +34,7 @@ __global__ void kernel_cuda_single_tensor(
         float curr_grad = g[global_id];
 
         //decoupled weight decay
-        p[global_id] = p[global_id] * (1 - lr * weight_decay)
+        p[global_id] = p[global_id] * (1 - lr * weight_decay);
 
 
         exp_avg[global_id] = beta1 * exp_avg[global_id] + (1 - beta1) * curr_grad;
@@ -78,7 +42,7 @@ __global__ void kernel_cuda_single_tensor(
 
         const float correction1 = 1.0f - powf(beta1, step);
         const float correction2_sqrt = sqrtf(1.0f - powf(beta2, step));
-        float step_size = lr / correction1
+        float step_size = lr / correction1;
         /*
 
         step_size = lr / correction1
@@ -92,4 +56,41 @@ __global__ void kernel_cuda_single_tensor(
         float denom = (sqrtf(exp_avg_sq[global_id]) / correction2_sqrt + eps); // * correction1;
         float update = (exp_avg[global_id]/denom); // + (weight_decay * p[global_id]);
         p[global_id] = p[global_id] - (step_size * update);
+}
+
+
+void cuda_fused_single_tensor(Tensor& p, Tensor& g, Tensor& exp_avg, Tensor& exp_avg_sq,
+                      float beta1, float beta2, float lr, float weight_decay, float eps, float step) {
+    // Get tensor size
+    int total_size = p.numel();
+    AT_ASSERTM(at::cuda::detail::canUse32BitIndexMath(p),
+              "parameter tensor is too large to be indexed with int32");
+
+    const int block_dim = 128;
+    int grid_dim = ((total_size + block_dim - 1) / block_dim);
+    const dim3 blocks(grid_dim);
+
+    AT_DISPATCH_FLOATING_TYPES_AND_HALF(p.scalar_type(), "kernel_cuda_single_tensor", ([&] {
+        kernel_cuda_single_tensor<scalar_t><<<blocks, block_dim>>>(
+            p.data_ptr<scalar_t>(),
+            g.data_ptr<scalar_t>(),
+            exp_avg.data_ptr<scalar_t>(),
+            exp_avg_sq.data_ptr<scalar_t>(),
+            beta1,
+            beta2,
+            lr,
+            weight_decay,
+            eps,
+            step,
+            total_size
+        );
+    }));
+
+    AT_CUDA_CHECK(cudaGetLastError());
+}
+
+
+__device__ __forceinline__ float atomicMax(float * addr, float value) {
+
+    return __int_as_float(atomicMax((int *)addr, __float_as_int(value)));
 }
