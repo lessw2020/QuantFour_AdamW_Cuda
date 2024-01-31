@@ -120,8 +120,8 @@ __global__ void quantfourbit_cuda_kernel(
     const int threadid = threadIdx.x
     const int global_id = blockIdx.x * blockDim.x + threadid;
     const int block_id = blockIdx.x;
-    const int left_val = global_id << 1;
-    const int right_val = (global_id << 1) + 1;
+    const int left_id = global_id << 1;
+    const int right_id = (global_id << 1) + 1;
     const float correction1 = 1.0f - powf(beta1, step);
     const float correction2_sqrt = sqrtf(1.0f- powf(beta2, step));
 
@@ -134,5 +134,37 @@ __global__ void quantfourbit_cuda_kernel(
     }
 
     __synchthreads();
+
+    if (left_id >= total_size) return;
+
+    // left side processing
+    const int8_t bitmask = (1 << 4) -1;
+
+    const int8_t exp_avg_left = (exp_avg[global_id]) & bitmask;
+    T exp_avg_left = (T)exp_avg_qmap[exp_avg_left] * exp_avg_qscale[block_id];
+    exp_avg_left = beta1 * exp_avg_left + (1 - beta1) * g[left_id]
+
+    const uint8_t exp_avg_sq_left = (exp_avg_sq[left_id]) & bitmask;
+    T exp_avg_sq_left = (T)exp_avg_sq_qmap[exp_avg_sq_left] * exp_avg_sq_scale[block_id];
+    exp_avg_sq_left = beta2 * exp_avg_sq_left + (1 - beta2) * g[left_id] * g[left_id];
+
+    //decoupled weight decay
+    p[left_id] = p[left_id] * (1 - lr * weight_decay);
+
+    const float correction1 = 1.0f - powf(beta1, step);
+    float step_size = lr / correction1;
+
+    const float correction2_sqrt = sqrtf(1.0f - powf(beta2, step));
+
+    float denom_left = (sqrtf(exp_avg_sq_left) / correction2_sqrt + eps);
+    float update_left = (exp_avg_left/denom_left);
+
+    p[left_id] = p[left_id] - (step_size * update_left);
+
+
+
+
+
+    //
 
 }
