@@ -94,3 +94,45 @@ __device__ __forceinline__ float atomicMax(float * addr, float value) {
 
     return __int_as_float(atomicMax((int *)addr, __float_as_int(value)));
 }
+
+template <typename T>
+__global__ void quantfourbit_cuda_kernel(
+    T* __restrict__ params,
+    const T* __restrict__ grads,
+    int8_t* __restrict__ exp_avg,
+    int8_t* __restrict__ exp_avg_sq,
+    T* __restrict__ exp_avg_qscale,
+    T* __restrict__ exp_avg_sq_qscale,
+    const float* __restrict__ exp_avg_qmap,
+    const float* __restrict__ exp_avg_qmid,
+    const float* __restrict__ exp_avg_sq_qmap,
+    const float* __restrict__ exp_avg_sq_qmid,
+    const float beta1,
+    const float beta2,
+    const float lr,
+    const float weight_decay,
+    const float eps,
+    const float step,
+    const float total_size
+
+)
+{
+    const int threadid = threadIdx.x
+    const int global_id = blockIdx.x * blockDim.x + threadid;
+    const int block_id = blockIdx.x;
+    const int left_val = global_id << 1;
+    const int right_val = (global_id << 1) + 1;
+    const float correction1 = 1.0f - powf(beta1, step);
+    const float correction2_sqrt = sqrtf(1.0f- powf(beta2, step));
+
+    __shared__ float absmax_exp_avg;
+    __shared__ float absmax_exp_avg_sq;
+
+    if (threadid == 0) {
+        absmax_exp = 0;
+        absmax_exp_sq = 0;
+    }
+
+    __synchthreads();
+
+}
