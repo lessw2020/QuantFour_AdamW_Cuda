@@ -147,7 +147,7 @@ __global__ void quantfourbit_adamw_kernel(
 
 )
 {
-    const int threadid = threadIdx.x
+    const int thread_id = threadIdx.x
     const int global_id = blockIdx.x * blockDim.x + threadid;
     const int block_id = blockIdx.x;
 
@@ -160,7 +160,7 @@ __global__ void quantfourbit_adamw_kernel(
     __shared__ float absmax_exp;
     __shared__ float absmax_sq;
 
-    if (threadid == 0) {
+    if (thread_id == 0) {
         absmax_exp = 0f;
         absmax_sq = 0f;
     }
