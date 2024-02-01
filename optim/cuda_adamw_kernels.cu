@@ -120,8 +120,10 @@ __global__ void quantfourbit_cuda_kernel(
     const int threadid = threadIdx.x
     const int global_id = blockIdx.x * blockDim.x + threadid;
     const int block_id = blockIdx.x;
+
     const int left_id = global_id << 1;
     const int right_id = (global_id << 1) + 1;
+
     const float correction1 = 1.0f - powf(beta1, step);
     const float correction2_sqrt = sqrtf(1.0f- powf(beta2, step));
 
@@ -187,7 +189,7 @@ __global__ void quantfourbit_cuda_kernel(
 
         }
 
-    // prepare quantization info - update scales
+    // prepare quantization info - update absmax scales
     float local_absmax_exp = fmax(fabsf((float)exp_left), fabsf((float)exp_right));
     float local_absmax_sq = fmaxf((float)sq_left, (float)sq_right);
     atomicMax(&absmax_exp, local_absmax_exp);
@@ -196,17 +198,18 @@ __global__ void quantfourbit_cuda_kernel(
 
     int8_t local_packed_exp = 0;
     int8_t local_packed_sq = 0;
-    // TODO - implement qmapping
+
+    // TODO - implement qmapping bsearch
     const int8_t q_exp_left = (int8_t)q_mapping(exp_qmap, exp_qmidpt, (float)exp_left / absmax_exp);
     const int8_t q_sq_left = (int8_t)q_mapping(sq_qmap, sq_qmidpt, (float)sq_left / absmax_sq);
-    local_packed_exp |= (q_exp_left & mask);
-    local_packed_sq |= (q_sq_left & mask);
+    local_packed_exp |= (q_exp_left & bitmask);
+    local_packed_sq |= (q_sq_left & bitmask);
 
     if (right_id < total_size) {
         const int8_t q_exp_right = (int8_t)q_mapping(exp_qmap, exp_qmidpt, (float)exp_right / absmax_exp);
         const int8_t q_sq_right = (int8_t)q_mapping(sq_qmap, sq_qmidpt, (float)sq_right / absmax_sq);
-        local_packed_exp |= (q_exp_right & mask << 4);
-        local_packed_sq |= (q_sq_right & mask << 4);
+        local_packed_exp |= (q_exp_right & bitmask << 4);
+        local_packed_sq |= (q_sq_right & bitmask << 4);
 
     }
 
