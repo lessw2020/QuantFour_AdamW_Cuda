@@ -4,6 +4,7 @@
 
 using torch::Tensor;
 
+// declarations
 void cuda_fused_4bit(Tensor& p, Tensor& g,
                         Tensor& exp, Tensor& sq,
                         Tensor& exp_scale, Tensor& sq_scale,
@@ -21,19 +22,17 @@ void cuda_fused_single_tensor(Tensor& p, Tensor& g,
                         float eps, float step);
 
 
-
-void fused_single_tensor(
-    Tensor& p,
-    Tensor& g,
-    Tensor& exp_avg,
-    Tensor& exp_avg_sq,
-    float beta1,
-    float beta2,
-    float lr,
-    float weight_decay,
-    float eps,
-    float step
-) {
+// python interface for quantized 4bit AdamW
+void fused_4bit(Tensor& p, Tensor& g,
+                Tensor& exp, Tensor& sq,
+                Tensor& exp_scale, Tensor& sq_scale,
+                Tensor& exp_qmap, Tensor& exp_qmidpt,
+                Tensor& sq_qmap, Tensor& sq_qmidpt,
+                float beta1, float beta2,
+                float lr, float weight_decay,
+                float eps, float step
+)
+ {
 
     // call the cuda kernel
     cuda_fused_4bit(p, g,
@@ -46,17 +45,19 @@ void fused_single_tensor(
                     eps, step);
 }
 
-// python interface for quantized 4bit AdamW
-void fused_4bit(Tensor& p, Tensor& g,
-                Tensor& exp, Tensor& sq,
-                Tensor& exp_scale, Tensor& sq_scale,
-                Tensor& exp_qmap, Tensor& exp_qmidpt,
-                Tensor& sq_qmap, Tensor& sq_qmidpt,
-                float beta1, float beta2,
-                float lr, float weight_decay,
-                float eps, float step
-) {
-
+// python interface for single tensor AdamW
+void fused_single_tensor(
+    Tensor& p,
+    Tensor& g,
+    Tensor& exp_avg,
+    Tensor& exp_avg_sq,
+    float beta1,
+    float beta2,
+    float lr,
+    float weight_decay,
+    float eps,
+    float step
+    ) {
     // call the cuda kernel
     cuda_fused_single_tensor(p, g, exp_avg, exp_avg_sq,
                     beta1, beta2, lr, weight_decay, eps, step);

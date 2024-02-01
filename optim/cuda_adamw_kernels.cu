@@ -119,7 +119,7 @@ __device__ __forceinline__ float q_mapping( const float* __restrict__ qmap,
         }
     }
 
-    return (qmidpt[low-1] < mid_val) ? low : low-1;
+    return (qmidpt[low-1] < x) ? low : low-1;
 
 }
 
@@ -129,8 +129,8 @@ template <typename T>
 __global__ void quantfourbit_adamw_kernel(
     T* __restrict__ p,
     const T* __restrict__ g,
-    int8_t* __restrict__ exp_avg,
-    int8_t* __restrict__ exp_avg_sq,
+    int8_t* __restrict__ exp,
+    int8_t* __restrict__ sq,
     T* __restrict__ exp_qscale,
     T* __restrict__ sq_qscale,
     const float* __restrict__ exp_qmap,
@@ -147,22 +147,19 @@ __global__ void quantfourbit_adamw_kernel(
 
 )
 {
-    const int thread_id = threadIdx.x
-    const int global_id = blockIdx.x * blockDim.x + threadid;
+    const int thread_id = threadIdx.x;
+    const int global_id = blockIdx.x * blockDim.x + thread_id;
     const int block_id = blockIdx.x;
 
     const int left_id = global_id << 1;
     const int right_id = (global_id << 1) + 1;
 
-    const float correction1 = 1.0f - powf(beta1, step);
-    const float correction2_sqrt = sqrtf(1.0f- powf(beta2, step));
-
     __shared__ float absmax_exp;
     __shared__ float absmax_sq;
 
     if (thread_id == 0) {
-        absmax_exp = 0f;
-        absmax_sq = 0f;
+        absmax_exp = 0;
+        absmax_sq = 0;
     }
     __synchthreads();
 
