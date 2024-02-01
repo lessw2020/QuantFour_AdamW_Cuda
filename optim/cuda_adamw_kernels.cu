@@ -161,7 +161,8 @@ __global__ void quantfourbit_adamw_kernel(
         absmax_exp = 0;
         absmax_sq = 0;
     }
-    __synchthreads();
+    __syncthreads();
+
 
     if (left_id >= total_size) return;
 
@@ -173,46 +174,46 @@ __global__ void quantfourbit_adamw_kernel(
 
 
     // left side processing
-    const int8_t exp_left = (exp_avg[global_id]) & bitmask;
-    const int8_t sq_left = (exp_avg_sq[left_id]) & bitmask;
+    const int8_t exp_left_index = (exp[global_id]) & bitmask;
+    const int8_t sq_left_index = (sq[left_id]) & bitmask;
 
     //decoupled weight decay
     p[left_id] = p[left_id] * (1 - lr * weight_decay);
 
     float curr_grad = g[left_id];
 
-    T exp_left = (T)exp_avg_qmap[exp_left] * exp_qscale[block_id];
-    exp_left = beta1 * exp_left + (1 - beta1) * curr_grad
+    T exp_left = (T)exp_qmap[exp_left_index] * exp_qscale[block_id];
+    exp_left = beta1 * exp_left + (1 - beta1) * curr_grad;
 
-    T sq_left = (T)exp_avg_sq_qmap[sq_left] * sq_qscale[block_id];
+    T sq_left = (T)sq_qmap[sq_left_index] * sq_qscale[block_id];
     sq_left = beta2 * sq_left + (1 - beta2) * (curr_grad * curr_grad);
 
     float denom = (sqrtf(sq_left) / correction2_sqrt + eps);
-    float update = (exp_left/denom_left);
+    float update = (exp_left/denom);
 
     // param update
     p[left_id] = p[left_id] - (step_size * update);
 
     // right side processing
-    T exp_right =0
-    T sq_right = 0
+    T exp_right =0;
+    T sq_right = 0;
 
     if (right_id < total_size) {
-        const int8_t exp_right = (exp_avg[global_id] >> 4) & bitmask;
-        const int8_t sq_right = (exp_avg_sq[global_id]>>4) & bitmask;
+        const int8_t exp_right_index = (exp[global_id] >> 4) & bitmask;
+        const int8_t sq_right_index = (sq[global_id]>>4) & bitmask;
         curr_grad = g[right_id];
 
         //decoupled weight decay, right side
         p[right_id] = p[right_id] * (1 - lr * weight_decay);
 
-        exp_right = (T)exp_avg_qmap[exp_right] * exp_qscale[block_id];
+        exp_right = (T)exp_qmap[exp_right_index] * exp_qscale[block_id];
         exp_right = beta1 * exp_right + (1-beta1) * curr_grad;
 
-        sq_right = (T)exp_avg_sq_qmap[sq_right] * sq_qscale[block_id];
+        sq_right = (T)sq_qmap[sq_right_index] * sq_qscale[block_id];
         sq_right = beta2 * sq_right + (1 - beta2) * (curr_grad * curr_grad);
 
         denom = (sqrtf(sq_right) / correction2_sqrt + eps);
-        update = (exp_right/denom_right);
+        update = (exp_right/denom);
 
         // param update
         p[right_id] = p[right_id] - (step_size * update);
@@ -224,7 +225,7 @@ __global__ void quantfourbit_adamw_kernel(
     float local_absmax_sq = fmaxf((float)sq_left, (float)sq_right);
     atomicPosMax(&absmax_exp, local_absmax_exp);
     atomicPosMax(&absmax_sq, local_absmax_sq);
-    __synchthreads();
+    __syncthreads();
 
     int8_t local_packed_exp = 0;
     int8_t local_packed_sq = 0;
@@ -244,13 +245,13 @@ __global__ void quantfourbit_adamw_kernel(
     }
 
     // store updated exp and sq
-    exp_avg[global_id] = local_packed_exp;
-    exp_avg_sq[global_id] = local_packed_sq;
+    exp[global_id] = local_packed_exp;
+    sq[global_id] = local_packed_sq;
     if (thread_id == 0) {
-        exp_qscale[scale_id] = (T)absmax_exp;
-        sq_qscale[scale_id] = (T)absmax_sq;
+        exp_qscale[block_id] = (T)absmax_exp;
+        sq_qscale[block_id] = (T)absmax_sq;
     }
-    __synchthreads();
+    __syncthreads();
 
 }
 
