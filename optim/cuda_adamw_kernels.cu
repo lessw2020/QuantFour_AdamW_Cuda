@@ -58,7 +58,7 @@ __global__ void kernel_cuda_single_tensor(
         p[global_id] = p[global_id] - (step_size * update);
 }
 
-
+// interface and launcher for fused adamw cuda kernel
 void cuda_fused_single_tensor(Tensor& p, Tensor& g, Tensor& exp_avg, Tensor& exp_avg_sq,
                       float beta1, float beta2, float lr, float weight_decay, float eps, float step) {
     // Get tensor size
@@ -70,7 +70,7 @@ void cuda_fused_single_tensor(Tensor& p, Tensor& g, Tensor& exp_avg, Tensor& exp
     int grid_dim = ((total_size + block_dim - 1) / block_dim);
     const dim3 blocks(grid_dim);
 
-    AT_DISPATCH_FLOATING_TYPES_AND_HALF(p.scalar_type(), "kernel_cuda_single_tensor", ([&] {
+    AT_DISPATCH_FLOATING_TYPES_AND_HALF(p.scalar_type(), "cuda_fused_single_tensor", ([&] {
         kernel_cuda_single_tensor<scalar_t><<<blocks, block_dim>>>(
             p.data_ptr<scalar_t>(),
             g.data_ptr<scalar_t>(),
@@ -89,12 +89,13 @@ void cuda_fused_single_tensor(Tensor& p, Tensor& g, Tensor& exp_avg, Tensor& exp
     AT_CUDA_CHECK(cudaGetLastError());
 }
 
-
+// local vs global max
 __device__ __forceinline__ float atomicPosMax(float * addr, float value) {
 
     return __int_as_float(atomicMax((int *)addr, __float_as_int(value)));
 }
 
+// binary search for quantization
 __device__ __forceinline__ float q_mapping( const float* __restrict__ qmap,
                                             const float* __restrict__ qmidpt,
                                             float x)
@@ -123,33 +124,9 @@ __device__ __forceinline__ float q_mapping( const float* __restrict__ qmap,
 }
 
 
-__device__ __forceinline__ int q_mapping(const float* __restrict__ qmap,
-                                         int bits,
-                                         float x) {
-    int lo = 0;
-    int hi = 1 << bits;
-
-    if (x <= qmap[lo])
-      return lo;
-    if (qmap[hi - 1] <= x)
-      return (hi - 1);
-
-    while (lo < hi){
-      int mi = (lo + hi) >> 1;
-      if (qmap[mi] <= x) lo = mi + 1;
-      else hi = mi;
-    }
-    // return lo - 1;
-
-    int rank = 0;
-    float mid_val = (qmap[lo - 1] + qmap[lo]) * 0.5f;
-    rank = (mid_val < x) ? lo : lo - 1;
-    return rank;
-}
-
 
 template <typename T>
-__global__ void quantfourbit_cuda_kernel(
+__global__ void quantfourbit_adamw_kernel(
     T* __restrict__ p,
     const T* __restrict__ g,
     int8_t* __restrict__ exp_avg,
@@ -275,4 +252,45 @@ __global__ void quantfourbit_cuda_kernel(
     }
     __synchthreads();
 
+}
+
+// interface and launcher for 4bit quantized cuda kernel
+void cuda_4bit_launcher(Tensor& p, Tensor& g,
+                        Tensor& exp, Tensor& sq,
+                        Tensor& exp_scale, Tensor& sq_scale,
+                        Tensor& exp_qmap, Tensor& exp_qmidpt,
+                        Tensor& sq_qmap, Tensor& sq_qmidpt,
+                        float beta1, float beta2,
+                        float lr, float weight_decay,
+                        float eps, float step
+                        ){
+
+    int total_size = p.numel();
+    const int block_size = 128;
+    int grid = ((total_size + block_size -1) / block_size);
+    const dim3 blocks(grid);
+
+    AT_DISPATCH_FLOATING_TYPES_AND_HALF(p.scalar_type(), "cuda_4bit_launcher", ([&] {
+        quantfourbit_adamw_kernel<scalar_t><<<blocks, block_size/2>>>(
+            p.data_ptr<scalar_t>(),
+            g.data_ptr<scalar_t>(),
+            exp.data_ptr<int8_t>(),
+            sq.data_ptr<int8_t>(),
+            exp_scale.data_ptr<scalar_t>(),
+            sq_scale.data_ptr<scalar_t>(),
+            exp_qmap.data_ptr<float>(),
+            exp_qmidpt.data_ptr<float>(),
+            sq_qmap.data_ptr<float>(),
+            sq_qmidpt.data_ptr<float>(),
+            beta1,
+            beta2,
+            lr,
+            weight_decay,
+            eps,
+            step,
+            total_size
+        );
+    }));
+
+    AT_CUDA_CHECK(cudaGetLastError());
 }
