@@ -90,10 +90,63 @@ void cuda_fused_single_tensor(Tensor& p, Tensor& g, Tensor& exp_avg, Tensor& exp
 }
 
 
-__device__ __forceinline__ float atomicMax(float * addr, float value) {
+__device__ __forceinline__ float atomicPosMax(float * addr, float value) {
 
     return __int_as_float(atomicMax((int *)addr, __float_as_int(value)));
 }
+
+__device__ __forceinline__ float q_mapping( const float* __restrict__ qmap,
+                                            const float* __restrict__ qmidpt,
+                                            float x)
+{
+    // 4 bit range
+    int low = 0;
+    int high = 15;
+
+    if (x <= qmap[low]) return low;
+    if (qmap[high] <=x) return high;
+
+    while (low < high) {
+        int mid = (low + high) >> 1;
+        if (qmap[mid] <= x)
+        {
+            low = mid + 1;
+        }
+        else
+        {
+            high = mid;
+        }
+    }
+
+    return (qmidpt[low-1] < mid_val) ? low : low-1;
+
+}
+
+
+__device__ __forceinline__ int q_mapping(const float* __restrict__ qmap,
+                                         int bits,
+                                         float x) {
+    int lo = 0;
+    int hi = 1 << bits;
+
+    if (x <= qmap[lo])
+      return lo;
+    if (qmap[hi - 1] <= x)
+      return (hi - 1);
+
+    while (lo < hi){
+      int mi = (lo + hi) >> 1;
+      if (qmap[mi] <= x) lo = mi + 1;
+      else hi = mi;
+    }
+    // return lo - 1;
+
+    int rank = 0;
+    float mid_val = (qmap[lo - 1] + qmap[lo]) * 0.5f;
+    rank = (mid_val < x) ? lo : lo - 1;
+    return rank;
+}
+
 
 template <typename T>
 __global__ void quantfourbit_cuda_kernel(
@@ -192,8 +245,8 @@ __global__ void quantfourbit_cuda_kernel(
     // prepare quantization info - update absmax scales
     float local_absmax_exp = fmax(fabsf((float)exp_left), fabsf((float)exp_right));
     float local_absmax_sq = fmaxf((float)sq_left, (float)sq_right);
-    atomicMax(&absmax_exp, local_absmax_exp);
-    atomicMax(&absmax_sq, local_absmax_sq);
+    atomicPosMax(&absmax_exp, local_absmax_exp);
+    atomicPosMax(&absmax_sq, local_absmax_sq);
     __synchthreads();
 
     int8_t local_packed_exp = 0;
