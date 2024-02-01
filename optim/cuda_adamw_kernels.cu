@@ -129,10 +129,9 @@ __global__ void quantfourbit_cuda_kernel(
     __shared__ float absmax_exp_avg_sq;
 
     if (threadid == 0) {
-        absmax_exp = 0;
-        absmax_exp_sq = 0;
+        absmax_exp = 0f;
+        absmax_sq = 0f;
     }
-
     __synchthreads();
 
     if (left_id >= total_size) return;
@@ -145,53 +144,55 @@ __global__ void quantfourbit_cuda_kernel(
 
 
     // left side processing
-    const int8_t exp_avg_left = (exp_avg[global_id]) & bitmask;
-    const uint8_t exp_avg_sq_left = (exp_avg_sq[left_id]) & bitmask;
+    const int8_t exp_left = (exp_avg[global_id]) & bitmask;
+    const uint8_t sq_left = (exp_avg_sq[left_id]) & bitmask;
 
     //decoupled weight decay
     p[left_id] = p[left_id] * (1 - lr * weight_decay);
 
 
-    T exp_avg_left = (T)exp_avg_qmap[exp_avg_left] * exp_avg_qscale[block_id];
-    exp_avg_left = beta1 * exp_avg_left + (1 - beta1) * g[left_id]
+    T exp_left = (T)exp_avg_qmap[exp_left] * exp_avg_qscale[block_id];
+    exp_left = beta1 * exp_left + (1 - beta1) * g[left_id]
 
-    T exp_avg_sq_left = (T)exp_avg_sq_qmap[exp_avg_sq_left] * exp_avg_sq_scale[block_id];
-    exp_avg_sq_left = beta2 * exp_avg_sq_left + (1 - beta2) * g[left_id] * g[left_id];
+    T sq_left = (T)exp_avg_sq_qmap[sq_left] * exp_avg_sq_scale[block_id];
+    sq_left = beta2 * sq_left + (1 - beta2) * g[left_id] * g[left_id];
 
+    float denom_left = (sqrtf(sq_left) / correction2_sqrt + eps);
+    float update_left = (exp_left/denom_left);
 
-    float denom_left = (sqrtf(exp_avg_sq_left) / correction2_sqrt + eps);
-    float update_left = (exp_avg_left/denom_left);
     // param update
     p[left_id] = p[left_id] - (step_size * update_left);
 
     // right side processing
-    T exp_avg_right =0
-    T exp_avg_sq_right = 0
+    T exp_right =0
+    T sq_right = 0
 
     if (right_id < total_size) {
-        const uint8_t exp_avg_right = (exp_avg[global_id] >> 4) & bitmask;
-        const uint8_t exp_avg_sq_right = (exp_avg_sq[global_id]>>4) & bitmask;
+        const uint8_t exp_right = (exp_avg[global_id] >> 4) & bitmask;
+        const uint8_t sq_right = (exp_avg_sq[global_id]>>4) & bitmask;
 
         //decoupled weight decay, right side
         p[right_id] = p[right_id] * (1 - lr * weight_decay);
 
-        exp_avg_right = (T)exp_avg_qmap[exp_avg_right] * exp_avg_scale[block_id];
-        exp_avg_right = beta1 * exp_avg_right + (1-beta1) * g[right_id];
+        exp_right = (T)exp_avg_qmap[exp_right] * exp_avg_scale[block_id];
+        exp_right = beta1 * exp_right + (1-beta1) * g[right_id];
 
-        exp_avg_sq_right = (T)exp_avg_sq_qmap[exp_avg_sq_right] * exp_avg_sq_scale[block_id];
-        exp_avg_sq_right = beta2 * exp_avg_sq_right + (1 - beta2) * g[right_id] * g[right_id];
+        sq_right = (T)exp_avg_sq_qmap[sq_right] * exp_avg_sq_scale[block_id];
+        sq_right = beta2 * sq_right + (1 - beta2) * g[right_id] * g[right_id];
 
-        float denom_right = (sqrtf(exp_avg_sq_right) / correction2_sqrt + eps);
-        float update_right = (exp_avg_right/denom_right);
+        float denom_right = (sqrtf(sq_right) / correction2_sqrt + eps);
+        float update_right = (exp_right/denom_right);
         // param update
         p[right_id] = p[right_id] - (step_size * update_right);
 
         }
 
+    // prepare quantization info - update scales
+    float local_absmax_exp = fmax(fabsf((float)exp_left), fabsf((float)exp_right));
+    float local_absmax_sq = fmaxf((float)sq_left, (float)sq_right);
+    atomicMax(&absmax_exp, local_absmax_exp);
+    atomicMax(&absmax_sq, local_absmax_sq);
+    __synchthreads();
 
-
-
-
-    //
 
 }
