@@ -183,20 +183,6 @@ __global__ void quantfourbit_cuda_kernel(
 
         }
 
-        if (working_id1 < total_size) {
-            const uint8_t exp_avg_idx1 = (exp_avg[global_id] >> 4) & mask;
-            exp_avg1 = (T)exp_avg_qmap[exp_avg_idx1] * exp_avg_scale[scale_id];
-            exp_avg1 = beta1 * exp_avg1 + (1 - beta1) * g[working_id1];
-
-            const uint8_t exp_avg_sq_idx1 = (exp_avg_sq[global_id] >> 4) & mask;
-            exp_avg_sq1 = (T)exp_avg_sq_qmap[exp_avg_sq_idx1] * exp_avg_sq_scale[scale_id];
-            exp_avg_sq1 = beta2 * exp_avg_sq1 + (1 - beta2) * g[working_id1] * g[working_id1];
-
-            float denom1 = (sqrtf(exp_avg_sq1) / correction2_sqrt + eps) * correction1;
-            float update1 = (exp_avg1/denom1) + (weight_decay * p[working_id1]);
-            p[working_id1] = p[working_id1] - (lr * update1);
-        }
-
 
 
 
