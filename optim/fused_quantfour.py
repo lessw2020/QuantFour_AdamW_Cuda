@@ -390,8 +390,7 @@ class AdamWFused_QuantFour(torch.optim.Optimizer):
                     # if "max1" in exp_avgs_q_overhead[i]:
                     exp_avg_scale = variance_meta[i]["max1"]
                     exp_avg_sq_scale = momentum_meta[i]["max1"]
-                    lprint(f"{exp_avg_scale=}, {exp_avg_sq_scale=}")
-                    assert False, 'end of step check'
+
                     fused_4bit(param, grad, q_exp_avg, q_exp_avg_sq,
                             exp_avg_scale, exp_avg_sq_scale,
                             _momentum_qmap, _momentum_midpoint_lut,
@@ -399,6 +398,8 @@ class AdamWFused_QuantFour(torch.optim.Optimizer):
                             beta1, beta2,
                             lr, weight_decay,
                             eps, step)
+                    lprint(f"Back from 4bit! {exp_avg_scale=}, {exp_avg_sq_scale=}")
+                    assert False, 'end of step check'
                     # p, g, exp_avg, exp_avg_sq,
                     # beta1, beta2, lr, weight_decay, eps, step
 
