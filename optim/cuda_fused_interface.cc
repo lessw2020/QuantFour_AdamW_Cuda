@@ -15,11 +15,6 @@ void cuda_fused_4bit(Tensor& p, Tensor& g,
                         float eps, float step
                         );
 
-void cuda_fused_single_tensor(Tensor& p, Tensor& g,
-                        Tensor& exp_avg,Tensor& exp_avg_sq,
-                        float beta1, float beta2,
-                        float lr, float weight_decay,
-                        float eps, float step);
 
 
 // python interface for quantized 4bit AdamW
@@ -44,6 +39,13 @@ void fused_4bit(Tensor& p, Tensor& g,
                     lr, weight_decay,
                     eps, step);
 }
+
+void cuda_fused_single_tensor(Tensor& p, Tensor& g,
+                        Tensor& exp_avg,Tensor& exp_avg_sq,
+                        float beta1, float beta2,
+                        float lr, float weight_decay,
+                        float eps, float step);
+
 
 // python interface for single tensor AdamW
 void fused_single_tensor(

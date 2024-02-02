@@ -11,7 +11,7 @@ from .quant_opt_base import create_dynamic_map, create_pow_map, create_qmap
 import triton
 import triton.language as tl
 from .q_binary_search import q_mapping_kernel
-from quantfour_cuda import fused_single_tensor
+from quantfour_cuda import fused_single_tensor, fused_4bit
 
 __all__ = ["AdamW_Fused_QuantFour"]
 
@@ -382,8 +382,23 @@ class AdamWFused_QuantFour(torch.optim.Optimizer):
                     #fused_4bit_triton_wrapper_starter(param, p_num_elem, grad, q_exp_avg, q_exp_avg_sq,
                     #                beta1, beta2, lr, weight_decay, eps, t_step)
 
-                    fused_single_tensor(param, grad, q_exp_avg, q_exp_avg_sq,
-                                beta1, beta2, lr, weight_decay, eps, t_step)
+                    # fused_single_tensor(param, grad, q_exp_avg, q_exp_avg_sq,
+                    #             beta1, beta2, lr, weight_decay, eps, t_step)
+
+                # momentum_meta.append(state["momentum_qstate"]["overhead"])
+                # variance_meta.append(state["variance_qstate"]["overhead"])
+                    # if "max1" in exp_avgs_q_overhead[i]:
+                    exp_avg_scale = variance_meta[i]["max1"]
+                    exp_avg_sq_scale = momentum_meta[i]["max1"]
+                    lprint(f"{exp_avg_scale=}, {exp_avg_sq_scale=}")
+                    assert False, 'end of step check'
+                    fused_4bit(param, grad, q_exp_avg, q_exp_avg_sq,
+                            exp_avg_scale, exp_avg_sq_scale,
+                            _momentum_qmap, _momentum_midpoint_lut,
+                            _variance_qmap, _variance_midpoint_lut,
+                            beta1, beta2,
+                            lr, weight_decay,
+                            eps, step)
                     # p, g, exp_avg, exp_avg_sq,
                     # beta1, beta2, lr, weight_decay, eps, step
 

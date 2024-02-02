@@ -126,7 +126,7 @@ __device__ __forceinline__ float q_mapping( const float* __restrict__ qmap,
 
 
 template <typename T>
-__global__ void quantfourbit_adamw_kernel(
+__global__ void cuda_fused_4bit_kernel(
     T* __restrict__ p,
     const T* __restrict__ g,
     int8_t* __restrict__ exp,
@@ -256,7 +256,7 @@ __global__ void quantfourbit_adamw_kernel(
 }
 
 // interface and launcher for 4bit quantized cuda kernel
-void cuda_4bit_launcher(Tensor& p, Tensor& g,
+void cuda_fused_4bit(Tensor& p, Tensor& g,
                         Tensor& exp, Tensor& sq,
                         Tensor& exp_scale, Tensor& sq_scale,
                         Tensor& exp_qmap, Tensor& exp_qmidpt,
@@ -271,8 +271,8 @@ void cuda_4bit_launcher(Tensor& p, Tensor& g,
     int grid = ((total_size + block_size -1) / block_size);
     const dim3 blocks(grid);
 
-    AT_DISPATCH_FLOATING_TYPES_AND_HALF(p.scalar_type(), "cuda_4bit_launcher", ([&] {
-        quantfourbit_adamw_kernel<scalar_t><<<blocks, block_size/2>>>(
+    AT_DISPATCH_FLOATING_TYPES_AND_HALF(p.scalar_type(), "cuda_fused_4bit", ([&] {
+        cuda_fused_4bit_kernel<scalar_t><<<blocks, block_size/2>>>(
             p.data_ptr<scalar_t>(),
             g.data_ptr<scalar_t>(),
             exp.data_ptr<int8_t>(),
