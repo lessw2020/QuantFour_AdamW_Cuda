@@ -143,7 +143,11 @@ __global__ void cuda_fused_4bit_kernel(
     const float weight_decay,
     const float eps,
     const float step,
-    const size_t total_size
+    const size_t total_size,
+    const float correction1,
+    const float correction2_sqrt,
+    const float step_size
+
 
 )
 {
@@ -168,9 +172,6 @@ __global__ void cuda_fused_4bit_kernel(
     if (left_id >= total_size) return;
 
     // universal processing
-    const float correction1 = 1.0f - powf(beta1, step);
-    float step_size = lr / correction1;
-    const float correction2_sqrt = sqrtf(1.0f - powf(beta2, step));
     const int8_t bitmask = (1 << 4) -1;
 
 
@@ -277,18 +278,12 @@ void cuda_fused_4bit(Tensor& p, Tensor& g,
     const int block_size = 128;
     int grid = ((total_size + block_size -1) / block_size);
     const dim3 blocks(grid);
+    //universal computations
+    const float correction1 = 1.0f - powf(beta1, step);
+    const float correction2_sqrt = sqrtf(1.0f - powf(beta2, step));
+    const float step_size = lr / correction1;
 
-    /*
-    p.data_ptr<scalar_t>(),
-            g.data_ptr<scalar_t>(),
-            exp_avg.data_ptr<int8_t>(),
-            exp_avg_sq.data_ptr<int8_t>(),
-            exp_avg_scale.data_ptr<scalar_t>(),
-            exp_avg_sq_scale.data_ptr<scalar_t>(),
-            exp_avg_qmap.data_ptr<float>(),
-            exp_avg_sq_qmap.data_ptr<float>(),
 
-    */
     AT_DISPATCH_FLOATING_TYPES_AND_HALF(p.scalar_type(), "cuda_fused_4bit", ([&] {
         cuda_fused_4bit_kernel<scalar_t><<<blocks, block_size/2>>>(
             p.data_ptr<scalar_t>(),
@@ -307,7 +302,11 @@ void cuda_fused_4bit(Tensor& p, Tensor& g,
             weight_decay,
             eps,
             step,
-            total_size
+            total_size,
+            correction1,
+            correction2_sqrt,
+            step_size
+
         );
     }));
 

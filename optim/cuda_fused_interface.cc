@@ -31,6 +31,7 @@ void fused_4bit(Tensor& p, Tensor& g,
 
     // call the cuda kernel
     printf("about to launch:");
+
     cuda_fused_4bit(p, g,
                     exp, sq,
                     exp_scale, sq_scale,
@@ -38,7 +39,8 @@ void fused_4bit(Tensor& p, Tensor& g,
                     sq_qmap, sq_qmidpt,
                     beta1, beta2,
                     lr, weight_decay,
-                    eps, step);
+                    eps, step
+                    );
     printf("back from fused kernel!");
 
 }
