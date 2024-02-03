@@ -36,7 +36,9 @@ _momentum_qmap = torch.tensor(
                 0.6625,
                 0.8875,
                 1.0000,
-            ]
+            ],
+            dtype=torch.float32,
+            device="cuda",
         )
 
 _momentum_midpoint_lut = torch.tensor(
@@ -78,7 +80,9 @@ _variance_qmap = torch.tensor(
                 0.8750,
                 0.9375,
                 1.0000,
-            ]
+            ],
+            dtype=torch.float32,
+            device="cuda",
         )
 
 _variance_midpoint_lut = torch.tensor(
@@ -98,7 +102,9 @@ _variance_midpoint_lut = torch.tensor(
             0.84375,
             0.90625,
             0.96875,
-        ]
+        ],
+        dtype=torch.float32,
+        device="cuda",
     )
 
 
@@ -301,18 +307,19 @@ class AdamWFused_QuantFour(torch.optim.Optimizer):
 
                     bytelength = p_num_elem # todo - undo this.... (p_num_elem + 1) // 2
                     blocks = (p_num_elem + 127) // 128
-                    curr_dtype = torch.float32
+                    curr_dtype = torch.int8
 
                     if q_exp_avg.numel() <= 1:
-                        q_exp_avg.data = exp_avg = torch.zeros_like(
-                        param, memory_format=torch.preserve_format
-                        )
-                        #q_exp_avg.data = torch.zeros((bytelength,), dtype=curr_dtype, device=param.device)
+                        # q_exp_avg.data = exp_avg = torch.zeros_like(
+                        # param, memory_format=torch.preserve_format
+                        # )
+                        q_exp_avg.data = torch.zeros((bytelength,), dtype=curr_dtype, device=param.device)
+
                     if q_exp_avg_sq.numel() <= 1:
-                        # q_exp_avg_sq.data = torch.zeros((bytelength,), dtype=curr_dtype, device=param.device)
-                        q_exp_avg_sq.data = exp_avg_sq = torch.zeros_like(
-                        param, memory_format=torch.preserve_format
-                        )
+                        q_exp_avg_sq.data = torch.zeros((bytelength,), dtype=curr_dtype, device=param.device)
+                        #q_exp_avg_sq.data = exp_avg_sq = torch.zeros_like(
+                        #param, memory_format=torch.preserve_format
+                        #)
 
                     exp_avg_scale = torch.zeros((blocks,), dtype=torch.float32, device=param.device)
                     momentum_meta[i]["max1"] = exp_avg_scale
@@ -322,7 +329,7 @@ class AdamWFused_QuantFour(torch.optim.Optimizer):
                     variance_meta[i]["max1"] = exp_avg_sq_scale
 
                     # ==== control math =============
-                    p2 = param.clone().detach()
+                    """p2 = param.clone().detach()
                     p2.mul_(1 - lr * weight_decay)
 
 
@@ -368,6 +375,7 @@ class AdamWFused_QuantFour(torch.optim.Optimizer):
                     assert torch.allclose(p2, p3, atol=1e-04, rtol=1e-0)
                     lprint(f"{p2=}, {p3=}")
                     #assert False, 'next check'
+                    """
                     # start fused kernel here....
                     assert param.is_cuda, f"param must be on cuda"
                     assert param.is_contiguous(), f"param must be contiguous"
@@ -390,15 +398,33 @@ class AdamWFused_QuantFour(torch.optim.Optimizer):
                     # if "max1" in exp_avgs_q_overhead[i]:
                     exp_avg_scale = variance_meta[i]["max1"]
                     exp_avg_sq_scale = momentum_meta[i]["max1"]
+                    lprint(f"types mo luts{type(_momentum_qmap)}, {type(_momentum_midpoint_lut)}")
+                    lprint(f"types sq luts{type(_variance_qmap)}, {type(_variance_midpoint_lut)}")
+                    lprint(f"types beta1{type(beta1)}, lr {type(lr)}, eps {type(eps)}, step {type(t_step)}")
+                    lprint(f"types exp_avg_scale {type(exp_avg_scale)}")
+                    lprint(f"types step {type(t_step.item())}, step {type(t_step)}, tstep {type(t_step)}, {type(lr)}")
+                    lprint(f"{q_exp_avg.dtype=}, {q_exp_avg_sq.dtype=}, {grad.dtype=}, {param.dtype=},")
 
+                    lprint(f"Start of 4bit! {exp_avg_scale=}, {exp_avg_sq_scale=}")
+                    lprint(f"{param[0]=}")
+
+                    # with torch.cuda.device(param.device):
                     fused_4bit(param, grad, q_exp_avg, q_exp_avg_sq,
-                            exp_avg_scale, exp_avg_sq_scale,
-                            _momentum_qmap, _momentum_midpoint_lut,
-                            _variance_qmap, _variance_midpoint_lut,
+                    exp_avg_scale, exp_avg_sq_scale,
+                    _momentum_qmap, _momentum_midpoint_lut,
+                    _variance_qmap, _variance_midpoint_lut,
                             beta1, beta2,
                             lr, weight_decay,
-                            eps, step)
+                            eps, t_step)
+
+                    torch.cuda.synchronize(param.device)
                     lprint(f"Back from 4bit! {exp_avg_scale=}, {exp_avg_sq_scale=}")
+                    lprint(f"{param[0]=}")
+                    assert False, 'end of step check'
+                    '''
+                    lprint(f"back from cuda {beta1=}")
+                    print(f"back from cuda {_momentum_qmap[0]=}")
+                    lprint(f"back from cuda {grad[0]=}")
                     assert False, 'end of step check'
                     # p, g, exp_avg, exp_avg_sq,
                     # beta1, beta2, lr, weight_decay, eps, step
@@ -411,6 +437,7 @@ class AdamWFused_QuantFour(torch.optim.Optimizer):
                     assert torch.allclose(p2, param, atol=1e-04, rtol=1e-0)
                     print(f"success with param! ")
                     #assert False, 'end of step check'
+                    '''
 
 
 def fused_4bit_triton_wrapper_starter(p, p_num_elem, g, exp_avg, exp_avg_sq,

@@ -143,13 +143,14 @@ __global__ void cuda_fused_4bit_kernel(
     const float weight_decay,
     const float eps,
     const float step,
-    const float total_size
+    const size_t total_size
 
 )
 {
     const int thread_id = threadIdx.x;
     const int global_id = blockIdx.x * blockDim.x + thread_id;
     const int block_id = blockIdx.x;
+
 
     const int left_id = global_id << 1;
     const int right_id = (global_id << 1) + 1;
@@ -158,8 +159,8 @@ __global__ void cuda_fused_4bit_kernel(
     __shared__ float absmax_sq;
 
     if (thread_id == 0) {
-        absmax_exp = 0;
-        absmax_sq = 0;
+        absmax_exp = 100.0;
+        absmax_sq = 120.0;
     }
     __syncthreads();
 
@@ -177,12 +178,15 @@ __global__ void cuda_fused_4bit_kernel(
     const int8_t exp_left_index = (exp[global_id]) & bitmask;
     const int8_t sq_left_index = (sq[left_id]) & bitmask;
 
+
     //decoupled weight decay
     p[left_id] = p[left_id] * (1 - lr * weight_decay);
 
+    // left exp and sq updates
     float curr_grad = g[left_id];
+    float exp_avg_qscale = exp_qscale[block_id];
 
-    T exp_left = (T)exp_qmap[exp_left_index] * exp_qscale[block_id];
+    T exp_left = (T)exp_qmap[exp_left_index] * exp_avg_qscale;
     exp_left = beta1 * exp_left + (1 - beta1) * curr_grad;
 
     T sq_left = (T)sq_qmap[sq_left_index] * sq_qscale[block_id];
@@ -193,6 +197,7 @@ __global__ void cuda_fused_4bit_kernel(
 
     // param update
     p[left_id] = p[left_id] - (step_size * update);
+
 
     // right side processing
     T exp_right =0;
@@ -206,7 +211,7 @@ __global__ void cuda_fused_4bit_kernel(
         //decoupled weight decay, right side
         p[right_id] = p[right_id] * (1 - lr * weight_decay);
 
-        exp_right = (T)exp_qmap[exp_right_index] * exp_qscale[block_id];
+        exp_right = (T)exp_qmap[exp_right_index] * exp_avg_qscale;
         exp_right = beta1 * exp_right + (1-beta1) * curr_grad;
 
         sq_right = (T)sq_qmap[sq_right_index] * sq_qscale[block_id];
@@ -219,10 +224,11 @@ __global__ void cuda_fused_4bit_kernel(
         p[right_id] = p[right_id] - (step_size * update);
 
         }
-
+    /*
     // prepare quantization info - update absmax scales
     float local_absmax_exp = fmax(fabsf((float)exp_left), fabsf((float)exp_right));
     float local_absmax_sq = fmaxf((float)sq_left, (float)sq_right);
+
     atomicPosMax(&absmax_exp, local_absmax_exp);
     atomicPosMax(&absmax_sq, local_absmax_sq);
     __syncthreads();
@@ -235,7 +241,7 @@ __global__ void cuda_fused_4bit_kernel(
     const int8_t q_sq_left = (int8_t)q_mapping(sq_qmap, sq_qmidpt, (float)sq_left / absmax_sq);
     local_packed_exp |= (q_exp_left & bitmask);
     local_packed_sq |= (q_sq_left & bitmask);
-
+    /*
     if (right_id < total_size) {
         const int8_t q_exp_right = (int8_t)q_mapping(exp_qmap, exp_qmidpt, (float)exp_right / absmax_exp);
         const int8_t q_sq_right = (int8_t)q_mapping(sq_qmap, sq_qmidpt, (float)sq_right / absmax_sq);
@@ -247,6 +253,7 @@ __global__ void cuda_fused_4bit_kernel(
     // store updated exp and sq
     exp[global_id] = local_packed_exp;
     sq[global_id] = local_packed_sq;
+    */
     if (thread_id == 0) {
         exp_qscale[block_id] = (T)absmax_exp;
         sq_qscale[block_id] = (T)absmax_sq;
@@ -271,6 +278,17 @@ void cuda_fused_4bit(Tensor& p, Tensor& g,
     int grid = ((total_size + block_size -1) / block_size);
     const dim3 blocks(grid);
 
+    /*
+    p.data_ptr<scalar_t>(),
+            g.data_ptr<scalar_t>(),
+            exp_avg.data_ptr<int8_t>(),
+            exp_avg_sq.data_ptr<int8_t>(),
+            exp_avg_scale.data_ptr<scalar_t>(),
+            exp_avg_sq_scale.data_ptr<scalar_t>(),
+            exp_avg_qmap.data_ptr<float>(),
+            exp_avg_sq_qmap.data_ptr<float>(),
+
+    */
     AT_DISPATCH_FLOATING_TYPES_AND_HALF(p.scalar_type(), "cuda_fused_4bit", ([&] {
         cuda_fused_4bit_kernel<scalar_t><<<blocks, block_size/2>>>(
             p.data_ptr<scalar_t>(),
