@@ -182,6 +182,15 @@ __device__ __forceinline__ float q_mapping( const float* __restrict__ qmap,
 
 }
 
+// atomic float max with correct negative handling
+__device__ __forceinline__ float atomicMaxFloat(float* addr, float value) {
+    float old;
+    old = !signbit(value) ? __int_as_float(atomicMax((int*)addr, __float_as_int(value))) :
+        __uint_as_float(atomicMin((unsigned int*)addr, __float_as_uint(value)));
+
+    return old;
+}
+
 template <typename T>
 __global__ void cuda_fused_4bit_kernel(
     T* __restrict__ p,
