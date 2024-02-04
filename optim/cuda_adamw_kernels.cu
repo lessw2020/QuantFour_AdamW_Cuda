@@ -32,7 +32,6 @@ static __device__ __const__ float _exp_qmap [] = {
                 1.0000,
 };
 
-
 static __device__ __const__ float _exp_qmidpt [] = {
 
             -0.775,
@@ -88,8 +87,6 @@ static __device__ __const__ float _sq_qmidpt [] = {
             0.90625,
             0.96875,
 };
-
-
 
 template <typename T>
 __global__ void kernel_cuda_single_tensor(
@@ -157,7 +154,6 @@ void cuda_fused_single_tensor(Tensor& p, Tensor& g, Tensor& exp_avg, Tensor& exp
     AT_CUDA_CHECK(cudaGetLastError());
 }
 
-
 // binary search for quantization
 __device__ __forceinline__ float q_mapping( const float* __restrict__ qmap,
                                             const float* __restrict__ qmidpt,
@@ -186,8 +182,6 @@ __device__ __forceinline__ float q_mapping( const float* __restrict__ qmap,
 
 }
 
-
-
 template <typename T>
 __global__ void cuda_fused_4bit_kernel(
     T* __restrict__ p,
@@ -208,13 +202,12 @@ __global__ void cuda_fused_4bit_kernel(
     const float step_size,
     const uint8_t bitmask
 
-
 )
 {
+    // establish thread, block and global situational awareness
     const int thread_id = threadIdx.x;
-    const int global_id = blockIdx.x * blockDim.x + thread_id;
     const int block_id = blockIdx.x;
-
+    const int global_id = blockIdx.x * blockDim.x + thread_id;
 
     const int left_id = global_id << 1;
     const int right_id = left_id + 1;
@@ -228,18 +221,11 @@ __global__ void cuda_fused_4bit_kernel(
     }
     __syncthreads();
 
-
-
     if (left_id >= total_size) return;
-
-    // universal processing
-    //const int8_t bitmask = 15; //(1 << 4) -1;
-
 
     // left side processing
     const int8_t exp_left_index = (exp[global_id]) & bitmask;
     const int8_t sq_left_index = (sq[left_id]) & bitmask;
-
 
     //decoupled weight decay
     p[left_id] = p[left_id] * (1 - lr * weight_decay);
@@ -259,7 +245,6 @@ __global__ void cuda_fused_4bit_kernel(
 
     // param update
     p[left_id] = p[left_id] - (step_size * update);
-
 
     // right side processing
     T exp_right =0;
