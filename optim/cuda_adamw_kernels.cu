@@ -163,8 +163,8 @@ __global__ void cuda_fused_4bit_kernel(
     __shared__ float absmax_sq;
 
     if (thread_id == 0) {
-        absmax_exp = 100.0;
-        absmax_sq = 120.0;
+        absmax_exp = 0;
+        absmax_sq = 0;
     }
     __syncthreads();
 
@@ -172,7 +172,7 @@ __global__ void cuda_fused_4bit_kernel(
     if (left_id >= total_size) return;
 
     // universal processing
-    const int8_t bitmask = (1 << 4) -1;
+    const int8_t bitmask = 15; //(1 << 4) -1;
 
 
     // left side processing
@@ -225,7 +225,7 @@ __global__ void cuda_fused_4bit_kernel(
         p[right_id] = p[right_id] - (step_size * update);
 
         }
-    /*
+
     // prepare quantization info - update absmax scales
     float local_absmax_exp = fmax(fabsf((float)exp_left), fabsf((float)exp_right));
     float local_absmax_sq = fmaxf((float)sq_left, (float)sq_right);
@@ -242,7 +242,7 @@ __global__ void cuda_fused_4bit_kernel(
     const int8_t q_sq_left = (int8_t)q_mapping(sq_qmap, sq_qmidpt, (float)sq_left / absmax_sq);
     local_packed_exp |= (q_exp_left & bitmask);
     local_packed_sq |= (q_sq_left & bitmask);
-    /*
+
     if (right_id < total_size) {
         const int8_t q_exp_right = (int8_t)q_mapping(exp_qmap, exp_qmidpt, (float)exp_right / absmax_exp);
         const int8_t q_sq_right = (int8_t)q_mapping(sq_qmap, sq_qmidpt, (float)sq_right / absmax_sq);
@@ -254,7 +254,7 @@ __global__ void cuda_fused_4bit_kernel(
     // store updated exp and sq
     exp[global_id] = local_packed_exp;
     sq[global_id] = local_packed_sq;
-    */
+
     if (thread_id == 0) {
         exp_qscale[block_id] = (T)absmax_exp;
         sq_qscale[block_id] = (T)absmax_sq;
