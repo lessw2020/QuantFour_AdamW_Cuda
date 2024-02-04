@@ -13,6 +13,8 @@
 
 using torch::Tensor;
 
+static __device__ __const__ uint8_t _bitmask = 15;
+
 static __device__ __const__ float _exp_qmap [] = {
                 -0.8875,
                 -0.6625,
@@ -207,7 +209,6 @@ __global__ void cuda_fused_4bit_kernel(
     const float correction1,
     const float correction2_sqrt,
     const float step_size,
-    const uint8_t bitmask,
     const float weight_decay_update
 
 )
@@ -231,10 +232,9 @@ __global__ void cuda_fused_4bit_kernel(
         absmax_sq = 0;
     }
 
-
     // left side processing -------------------------------------
-    const int8_t exp_left_index = (exp[global_id]) & bitmask;
-    const int8_t sq_left_index = (sq[left_id]) & bitmask;
+    const int8_t exp_left_index = (exp[global_id]) & _bitmask;
+    const int8_t sq_left_index = (sq[left_id]) & _bitmask;
 
     //decoupled weight decay
     p[left_id] = p[left_id] * weight_decay_update;
@@ -260,8 +260,8 @@ __global__ void cuda_fused_4bit_kernel(
     T sq_right = 0;
 
     if (right_id < total_size) {
-        const int8_t exp_right_index = (exp[global_id] >> 4) & bitmask;
-        const int8_t sq_right_index = (sq[global_id]>>4) & bitmask;
+        const int8_t exp_right_index = (exp[global_id] >> 4) & _bitmask;
+        const int8_t sq_right_index = (sq[global_id]>>4) & _bitmask;
         curr_grad = g[right_id];
 
         //decoupled weight decay, right side
@@ -300,14 +300,14 @@ __global__ void cuda_fused_4bit_kernel(
     // quantize and pack
     const int8_t q_exp_left = (int8_t)q_mapping(_exp_qmap, _exp_qmidpt, (float)exp_left / absmax_exp);
     const int8_t q_sq_left = (int8_t)q_mapping(_sq_qmap, _sq_qmidpt, (float)sq_left / absmax_sq);
-    local_packed_exp |= (q_exp_left & bitmask);
-    local_packed_sq |= (q_sq_left & bitmask);
+    local_packed_exp |= (q_exp_left & _bitmask);
+    local_packed_sq |= (q_sq_left & _bitmask);
 
     if (right_id < total_size) {
         const int8_t q_exp_right = (int8_t)q_mapping(_exp_qmap, _exp_qmidpt, (float)exp_right / absmax_exp);
         const int8_t q_sq_right = (int8_t)q_mapping(_sq_qmap, _sq_qmidpt, (float)sq_right / absmax_sq);
-        local_packed_exp |= (q_exp_right & bitmask << 4);
-        local_packed_sq |= (q_sq_right & bitmask << 4);
+        local_packed_exp |= (q_exp_right & _bitmask << 4);
+        local_packed_sq |= (q_sq_right & _bitmask << 4);
 
     }
 
@@ -342,9 +342,6 @@ void cuda_fused_4bit(Tensor& p, Tensor& g,
     const float step_size = lr / correction1;
     const float weight_decay_update = 1 - lr * weight_decay;
 
-    // leverage constant memory - todo
-    const uint8_t g_bitmask = 15;
-
 
     AT_DISPATCH_FLOATING_TYPES_AND_HALF(p.scalar_type(), "cuda_fused_4bit", ([&] {
         cuda_fused_4bit_kernel<scalar_t><<<blocks, block_size/2>>>(
@@ -364,7 +361,6 @@ void cuda_fused_4bit(Tensor& p, Tensor& g,
             correction1,
             correction2_sqrt,
             step_size,
-            g_bitmask,
             weight_decay_update
 
         );
