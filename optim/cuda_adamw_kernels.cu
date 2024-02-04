@@ -207,7 +207,8 @@ __global__ void cuda_fused_4bit_kernel(
     const float correction1,
     const float correction2_sqrt,
     const float step_size,
-    const uint8_t bitmask
+    const uint8_t bitmask,
+    const float weight_decay_update
 
 )
 {
@@ -229,14 +230,14 @@ __global__ void cuda_fused_4bit_kernel(
         absmax_exp = 0;
         absmax_sq = 0;
     }
-    //__syncthreads();
 
-    // left side processing
+
+    // left side processing -------------------------------------
     const int8_t exp_left_index = (exp[global_id]) & bitmask;
     const int8_t sq_left_index = (sq[left_id]) & bitmask;
 
     //decoupled weight decay
-    p[left_id] = p[left_id] * (1 - lr * weight_decay);
+    p[left_id] = p[left_id] * weight_decay_update;
 
     // left exp and sq updates
     float curr_grad = g[left_id];
@@ -254,7 +255,7 @@ __global__ void cuda_fused_4bit_kernel(
     // param update
     p[left_id] = p[left_id] - (step_size * update);
 
-    // right side processing
+    // right side processing -------------------------------
     T exp_right =0;
     T sq_right = 0;
 
@@ -264,7 +265,7 @@ __global__ void cuda_fused_4bit_kernel(
         curr_grad = g[right_id];
 
         //decoupled weight decay, right side
-        p[right_id] = p[right_id] * (1 - lr * weight_decay);
+        p[right_id] = p[right_id] * weight_decay_update;
 
         exp_right = _exp_qmap[exp_right_index] * exp_avg_qscale;
         exp_right = beta1 * exp_right + (1-beta1) * curr_grad;
@@ -339,8 +340,9 @@ void cuda_fused_4bit(Tensor& p, Tensor& g,
     const float correction1 = 1.0f - powf(beta1, step);
     const float correction2_sqrt = sqrtf(1.0f - powf(beta2, step));
     const float step_size = lr / correction1;
+    const float weight_decay_update = 1 - lr * weight_decay;
 
-    // leverage constant memory
+    // leverage constant memory - todo
     const uint8_t g_bitmask = 15;
 
 
@@ -362,7 +364,8 @@ void cuda_fused_4bit(Tensor& p, Tensor& g,
             correction1,
             correction2_sqrt,
             step_size,
-            g_bitmask
+            g_bitmask,
+            weight_decay_update
 
         );
     }));
