@@ -219,6 +219,9 @@ __global__ void cuda_fused_4bit_kernel(
     const int left_id = global_id << 1;
     const int right_id = left_id + 1;
 
+    // fail fast
+    if (left_id >= total_size) return;
+
     __shared__ float absmax_exp;
     __shared__ float absmax_sq;
 
@@ -226,9 +229,7 @@ __global__ void cuda_fused_4bit_kernel(
         absmax_exp = 0;
         absmax_sq = 0;
     }
-    __syncthreads();
-
-    if (left_id >= total_size) return;
+    //__syncthreads();
 
     // left side processing
     const int8_t exp_left_index = (exp[global_id]) & bitmask;
