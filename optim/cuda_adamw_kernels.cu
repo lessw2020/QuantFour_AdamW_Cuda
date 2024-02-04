@@ -183,12 +183,10 @@ __device__ __forceinline__ float q_mapping( const float* __restrict__ qmap,
 }
 
 // atomic float max with correct negative handling
-__device__ __forceinline__ float atomicMaxFloat(float* addr, float value) {
-    float old;
-    old = !signbit(value) ? __int_as_float(atomicMax((int*)addr, __float_as_int(value))) :
-        __uint_as_float(atomicMin((unsigned int*)addr, __float_as_uint(value)));
+__device__ __forceinline__ void atomicMaxFloat(float* addr, float value) {
 
-    return old;
+    !signbit(value) ? __int_as_float(atomicMax((int*)addr, __float_as_int(value))) :
+        __uint_as_float(atomicMin((unsigned int*)addr, __float_as_uint(value)));
 }
 
 template <typename T>
@@ -286,8 +284,11 @@ __global__ void cuda_fused_4bit_kernel(
     float local_absmax_sq = fmaxf((float)sq_left, (float)sq_right);
 
     // determine global max for this block
-    __int_as_float(atomicMax((int *)&absmax_exp, __float_as_int(local_absmax_exp)));
-    __int_as_float(atomicMax((int *)&absmax_sq, __float_as_int(local_absmax_sq)));
+    atomicMaxFloat(&absmax_exp, local_absmax_exp);
+    atomicMaxFloat(&absmax_sq, local_absmax_sq);
+
+    //__int_as_float(atomicMax((int *)&absmax_exp, __float_as_int(local_absmax_exp)));
+    //__int_as_float(atomicMax((int *)&absmax_sq, __float_as_int(local_absmax_sq)));
 
     __syncthreads();
 
