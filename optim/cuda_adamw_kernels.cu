@@ -13,6 +13,84 @@
 
 using torch::Tensor;
 
+static __device__ __const__ float _exp_qmap [] = {
+                -0.8875,
+                -0.6625,
+                -0.4375,
+                -0.2125,
+                -0.0775,
+                -0.0325,
+                -0.0055,
+                0.0000,
+                0.0055,
+                0.0325,
+                0.0775,
+                0.2125,
+                0.4375,
+                0.6625,
+                0.8875,
+                1.0000,
+};
+
+
+static __device__ __const__ float _exp_qmidpt [] = {
+
+            -0.775,
+            -0.55,
+            -0.325,
+            -0.145,
+            -0.055,
+            -0.019,
+            -0.00275,
+            0.00275,
+            0.019,
+            0.055,
+            0.145,
+            0.325,
+            0.55,
+            0.775,
+            0.94375,
+};
+
+static __device__ __const__ float _sq_qmap [] = {
+                0.0625,
+                0.1250,
+                0.1875,
+                0.2500,
+                0.3125,
+                0.3750,
+                0.4375,
+                0.5000,
+                0.5625,
+                0.6250,
+                0.6875,
+                0.7500,
+                0.8125,
+                0.8750,
+                0.9375,
+                1.0000,
+};
+
+static __device__ __const__ float _sq_qmidpt [] = {
+            0.09375,
+            0.15625,
+            0.21875,
+            0.28125,
+            0.34375,
+            0.40625,
+            0.46875,
+            0.53125,
+            0.59375,
+            0.65625,
+            0.71875,
+            0.78125,
+            0.84375,
+            0.90625,
+            0.96875,
+};
+
+
+
 template <typename T>
 __global__ void kernel_cuda_single_tensor(
         T* __restrict__ p,
@@ -170,6 +248,7 @@ __global__ void cuda_fused_4bit_kernel(
     __syncthreads();
 
 
+
     if (left_id >= total_size) return;
 
     // universal processing
@@ -188,10 +267,10 @@ __global__ void cuda_fused_4bit_kernel(
     float curr_grad = g[left_id];
     float exp_avg_qscale = exp_qscale[block_id];
 
-    T exp_left = (T)exp_qmap[exp_left_index] * exp_avg_qscale;
+    T exp_left = _exp_qmap[exp_left_index] * exp_avg_qscale;
     exp_left = beta1 * exp_left + (1 - beta1) * curr_grad;
 
-    T sq_left = (T)sq_qmap[sq_left_index] * sq_qscale[block_id];
+    T sq_left = _sq_qmap[sq_left_index] * sq_qscale[block_id];
     sq_left = beta2 * sq_left + (1 - beta2) * (curr_grad * curr_grad);
 
     float denom = (sqrtf(sq_left) / correction2_sqrt + eps);
@@ -213,10 +292,10 @@ __global__ void cuda_fused_4bit_kernel(
         //decoupled weight decay, right side
         p[right_id] = p[right_id] * (1 - lr * weight_decay);
 
-        exp_right = (T)exp_qmap[exp_right_index] * exp_avg_qscale;
+        exp_right = _exp_qmap[exp_right_index] * exp_avg_qscale;
         exp_right = beta1 * exp_right + (1-beta1) * curr_grad;
 
-        sq_right = (T)sq_qmap[sq_right_index] * sq_qscale[block_id];
+        sq_right = _sq_qmap[sq_right_index] * sq_qscale[block_id];
         sq_right = beta2 * sq_right + (1 - beta2) * (curr_grad * curr_grad);
 
         denom = (sqrtf(sq_right) / correction2_sqrt + eps);
