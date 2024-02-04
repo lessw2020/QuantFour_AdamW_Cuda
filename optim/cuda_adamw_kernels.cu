@@ -176,6 +176,7 @@ __device__ __forceinline__ float q_mapping( const float* __restrict__ qmap,
     if (x <= qmap[low]) return low;
     if (qmap[high] <=x) return high;
 
+    #pragma unroll
     while (low < high) {
         int mid = (low + high) >> 1;
         if (qmap[mid] <= x)
