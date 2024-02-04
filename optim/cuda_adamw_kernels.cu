@@ -1,3 +1,10 @@
+// Copyright (c) Meta Platforms, Inc. and affiliates.
+// All rights reserved.
+
+// This is a productionized implementation of:
+// "Memory Efficient Optimizers with 4-bit States"
+// Bingrui Li, Jianfei Chen, Jun Zhu
+// https://arxiv.org/abs/2309.01507
 
 #include <ATen/ATen.h>
 #include <ATen/cuda/detail/IndexUtils.cuh>
