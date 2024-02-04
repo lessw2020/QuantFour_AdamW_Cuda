@@ -1,4 +1,4 @@
-# 4Bit_AdamW_Cuda
+# QuantFour_AdamW
 Triton does not support thread indexing and so had to move to Cuda for parallelized binary search support with quantization. 
 <br>Will HIP'ify for AMD support.
 
