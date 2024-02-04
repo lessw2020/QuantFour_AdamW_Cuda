@@ -97,7 +97,6 @@ __global__ void kernel_cuda_single_tensor(
         const T * __restrict__ g,
         T* __restrict__ exp_avg,
         T* __restrict__ exp_avg_sq,
-
         const float beta1,
         const float beta2,
         const float lr,
@@ -211,10 +210,6 @@ __global__ void cuda_fused_4bit_kernel(
     int8_t* __restrict__ sq,
     T* __restrict__ exp_qscale,
     T* __restrict__ sq_qscale,
-    const float* __restrict__ exp_qmap,
-    const float* __restrict__ exp_qmidpt,
-    const float* __restrict__ sq_qmap,
-    const float* __restrict__ sq_qmidpt,
     const float beta1,
     const float beta2,
     const float lr,
@@ -318,14 +313,14 @@ __global__ void cuda_fused_4bit_kernel(
     int8_t local_packed_sq = 0;
 
     // quantize and pack
-    const int8_t q_exp_left = (int8_t)q_mapping(exp_qmap, exp_qmidpt, (float)exp_left / absmax_exp);
-    const int8_t q_sq_left = (int8_t)q_mapping(sq_qmap, sq_qmidpt, (float)sq_left / absmax_sq);
+    const int8_t q_exp_left = (int8_t)q_mapping(_exp_qmap, _exp_qmidpt, (float)exp_left / absmax_exp);
+    const int8_t q_sq_left = (int8_t)q_mapping(_sq_qmap, _sq_qmidpt, (float)sq_left / absmax_sq);
     local_packed_exp |= (q_exp_left & bitmask);
     local_packed_sq |= (q_sq_left & bitmask);
 
     if (right_id < total_size) {
-        const int8_t q_exp_right = (int8_t)q_mapping(exp_qmap, exp_qmidpt, (float)exp_right / absmax_exp);
-        const int8_t q_sq_right = (int8_t)q_mapping(sq_qmap, sq_qmidpt, (float)sq_right / absmax_sq);
+        const int8_t q_exp_right = (int8_t)q_mapping(_exp_qmap, _exp_qmidpt, (float)exp_right / absmax_exp);
+        const int8_t q_sq_right = (int8_t)q_mapping(_sq_qmap, _sq_qmidpt, (float)sq_right / absmax_sq);
         local_packed_exp |= (q_exp_right & bitmask << 4);
         local_packed_sq |= (q_sq_right & bitmask << 4);
 
@@ -347,8 +342,6 @@ __global__ void cuda_fused_4bit_kernel(
 void cuda_fused_4bit(Tensor& p, Tensor& g,
                         Tensor& exp, Tensor& sq,
                         Tensor& exp_scale, Tensor& sq_scale,
-                        Tensor& exp_qmap, Tensor& exp_qmidpt,
-                        Tensor& sq_qmap, Tensor& sq_qmidpt,
                         float beta1, float beta2,
                         float lr, float weight_decay,
                         float eps, float step
@@ -375,10 +368,6 @@ void cuda_fused_4bit(Tensor& p, Tensor& g,
             sq.data_ptr<int8_t>(),
             exp_scale.data_ptr<scalar_t>(),
             sq_scale.data_ptr<scalar_t>(),
-            exp_qmap.data_ptr<float>(),
-            exp_qmidpt.data_ptr<float>(),
-            sq_qmap.data_ptr<float>(),
-            sq_qmidpt.data_ptr<float>(),
             beta1,
             beta2,
             lr,

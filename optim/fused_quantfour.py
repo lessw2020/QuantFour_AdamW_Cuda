@@ -412,8 +412,6 @@ class AdamWFused_QuantFour(torch.optim.Optimizer):
                     # with torch.cuda.device(param.device):
                     fused_4bit(param, grad, q_exp_avg, q_exp_avg_sq,
                     exp_avg_scale, exp_avg_sq_scale,
-                    _momentum_qmap, _momentum_midpoint_lut,
-                    _variance_qmap, _variance_midpoint_lut,
                             beta1, beta2,
                             lr, weight_decay,
                             eps, t_step)
