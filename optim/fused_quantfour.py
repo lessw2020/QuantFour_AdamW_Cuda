@@ -407,6 +407,7 @@ class AdamWFused_QuantFour(torch.optim.Optimizer):
 
                     lprint(f"Start of 4bit! {exp_avg_scale=}, {exp_avg_sq_scale=}")
                     lprint(f"{param[0]=}")
+                    lprint(f"{q_exp_avg[0:10]=}, {q_exp_avg_sq[0:10]=}")
 
                     # with torch.cuda.device(param.device):
                     fused_4bit(param, grad, q_exp_avg, q_exp_avg_sq,
@@ -420,6 +421,7 @@ class AdamWFused_QuantFour(torch.optim.Optimizer):
                     torch.cuda.synchronize(param.device)
                     lprint(f"Back from 4bit! {exp_avg_scale=}, {exp_avg_sq_scale=}")
                     lprint(f"{param[0]=}")
+                    lprint(f"{q_exp_avg[0:10]=}, {q_exp_avg_sq[0:10]=}")
                     assert False, 'end of step check'
                     '''
                     lprint(f"back from cuda {beta1=}")

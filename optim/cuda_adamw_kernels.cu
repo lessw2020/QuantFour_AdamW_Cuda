@@ -146,7 +146,8 @@ __global__ void cuda_fused_4bit_kernel(
     const size_t total_size,
     const float correction1,
     const float correction2_sqrt,
-    const float step_size
+    const float step_size,
+    const uint8_t bitmask
 
 
 )
@@ -157,7 +158,7 @@ __global__ void cuda_fused_4bit_kernel(
 
 
     const int left_id = global_id << 1;
-    const int right_id = (global_id << 1) + 1;
+    const int right_id = left_id + 1;
 
     __shared__ float absmax_exp;
     __shared__ float absmax_sq;
@@ -172,7 +173,7 @@ __global__ void cuda_fused_4bit_kernel(
     if (left_id >= total_size) return;
 
     // universal processing
-    const int8_t bitmask = 15; //(1 << 4) -1;
+    //const int8_t bitmask = 15; //(1 << 4) -1;
 
 
     // left side processing
@@ -283,6 +284,9 @@ void cuda_fused_4bit(Tensor& p, Tensor& g,
     const float correction2_sqrt = sqrtf(1.0f - powf(beta2, step));
     const float step_size = lr / correction1;
 
+    // leverage constant memory
+    const uint8_t g_bitmask = 15;
+
 
     AT_DISPATCH_FLOATING_TYPES_AND_HALF(p.scalar_type(), "cuda_fused_4bit", ([&] {
         cuda_fused_4bit_kernel<scalar_t><<<blocks, block_size/2>>>(
@@ -305,7 +309,8 @@ void cuda_fused_4bit(Tensor& p, Tensor& g,
             total_size,
             correction1,
             correction2_sqrt,
-            step_size
+            step_size,
+            g_bitmask
 
         );
     }));
