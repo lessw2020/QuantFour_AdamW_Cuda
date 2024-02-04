@@ -14,6 +14,7 @@
 using torch::Tensor;
 
 static __device__ __const__ uint8_t _bitmask = 15;
+static __device__ __const__ uint8_t _right_pack_bitmask = _bitmask << 4;
 
 static __device__ __const__ float _exp_qmap [] = {
                 -0.8875,
@@ -306,8 +307,8 @@ __global__ void cuda_fused_4bit_kernel(
     if (right_id < total_size) {
         const int8_t q_exp_right = (int8_t)q_mapping(_exp_qmap, _exp_qmidpt, (float)exp_right / absmax_exp);
         const int8_t q_sq_right = (int8_t)q_mapping(_sq_qmap, _sq_qmidpt, (float)sq_right / absmax_sq);
-        local_packed_exp |= (q_exp_right & _bitmask << 4);
-        local_packed_sq |= (q_sq_right & _bitmask << 4);
+        local_packed_exp |= (q_exp_right & _right_pack_bitmask);
+        local_packed_sq |= (q_sq_right & _right_pack_bitmask);
 
     }
 
