@@ -120,15 +120,6 @@ __global__ void kernel_cuda_single_tensor(
         const float correction1 = 1.0f - powf(beta1, step);
         const float correction2_sqrt = sqrtf(1.0f - powf(beta2, step));
         float step_size = lr / correction1;
-        /*
-
-        step_size = lr / correction1
-        denom = ((tl.sqrt(exp_avg_sq_val) / correction2_sqrt) + eps) # * correction1
-        update = (exp_avg_val / denom)
-        # weight update
-        p_val = p_val - step_size * update
-
-        */
 
         float denom = (sqrtf(exp_avg_sq[global_id]) / correction2_sqrt + eps); // * correction1;
         float update = (exp_avg[global_id]/denom); // + (weight_decay * p[global_id]);
@@ -166,11 +157,6 @@ void cuda_fused_single_tensor(Tensor& p, Tensor& g, Tensor& exp_avg, Tensor& exp
     AT_CUDA_CHECK(cudaGetLastError());
 }
 
-// local vs global max
-__device__ __forceinline__ float atomicPosMax(float * addr, float value) {
-
-    return __int_as_float(atomicMax((int *)addr, __float_as_int(value)));
-}
 
 // binary search for quantization
 __device__ __forceinline__ float q_mapping( const float* __restrict__ qmap,
@@ -305,8 +291,10 @@ __global__ void cuda_fused_4bit_kernel(
     float local_absmax_exp = fmax(fabsf((float)exp_left), fabsf((float)exp_right));
     float local_absmax_sq = fmaxf((float)sq_left, (float)sq_right);
 
-    atomicPosMax(&absmax_exp, local_absmax_exp);
-    atomicPosMax(&absmax_sq, local_absmax_sq);
+    // determine global max for this block
+    __int_as_float(atomicMax((int *)&absmax_exp, __float_as_int(local_absmax_exp)));
+    __int_as_float(atomicMax((int *)&absmax_sq, __float_as_int(local_absmax_sq)));
+
     __syncthreads();
 
     int8_t local_packed_exp = 0;
