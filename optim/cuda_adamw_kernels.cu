@@ -227,7 +227,9 @@ __global__ void cuda_fused_4bit_kernel(
     const float correction1,
     const float correction2_sqrt,
     const float step_size,
-    const float weight_decay_update
+    const float weight_decay_update,
+    const float resid_beta1,
+    const float resid_beta2
 
 )
 {
@@ -262,16 +264,17 @@ __global__ void cuda_fused_4bit_kernel(
     float exp_avg_qscale = exp_qscale[block_id];
 
     T exp_left = _exp_qmap[exp_left_index] * exp_avg_qscale;
-    exp_left = beta1 * exp_left + (1 - beta1) * curr_grad;
+    exp_left = beta1 * exp_left + resid_beta1 * curr_grad;
 
     T sq_left = _sq_qmap[sq_left_index] * sq_qscale[block_id];
-    sq_left = beta2 * sq_left + (1 - beta2) * (curr_grad * curr_grad);
+    sq_left = beta2 * sq_left + resid_beta2 * (curr_grad * curr_grad);
 
-    float denom = (sqrtf(sq_left) / correction2_sqrt + eps);
-    float update = (exp_left/denom);
+    //float denom = (sqrtf(sq_left) / correction2_sqrt + eps);
+    //float update = (exp_left/denom);
+    //float update = (exp_left/(sqrtf(sq_left) / correction2_sqrt + eps));
 
     // param update
-    p[left_id] = p[left_id] - (step_size * update);
+    p[left_id] = p[left_id] - (step_size * (exp_left/(sqrtf(sq_left) / correction2_sqrt + eps)));
 
     // right side processing -------------------------------
     T exp_right =0;
@@ -286,16 +289,16 @@ __global__ void cuda_fused_4bit_kernel(
         p[right_id] = p[right_id] * weight_decay_update;
 
         exp_right = _exp_qmap[exp_right_index] * exp_avg_qscale;
-        exp_right = beta1 * exp_right + (1-beta1) * curr_grad;
+        exp_right = beta1 * exp_right + resid_beta1 * curr_grad;
 
         sq_right = _sq_qmap[sq_right_index] * sq_qscale[block_id];
-        sq_right = beta2 * sq_right + (1 - beta2) * (curr_grad * curr_grad);
+        sq_right = beta2 * sq_right + resid_beta2 * (curr_grad * curr_grad);
 
-        denom = (sqrtf(sq_right) / correction2_sqrt + eps);
-        update = (exp_right/denom);
+        //denom = (sqrtf(sq_right) / correction2_sqrt + eps);
+        //update = (exp_right/denom);
 
         // param update
-        p[right_id] = p[right_id] - (step_size * update);
+        p[right_id] = p[right_id] - (step_size * (exp_right/(sqrtf(sq_right) / correction2_sqrt + eps)));
 
         }
 
@@ -359,6 +362,8 @@ void cuda_fused_4bit(Tensor& p, Tensor& g,
     const float correction2_sqrt = sqrtf(1.0f - powf(beta2, step));
     const float step_size = lr / correction1;
     const float weight_decay_update = 1 - lr * weight_decay;
+    const float resid_beta1 = 1.0f-beta1;
+    const float resid_beta2 = 1.0f - beta2;
 
 
     AT_DISPATCH_FLOATING_TYPES_AND_HALF(p.scalar_type(), "cuda_fused_4bit", ([&] {
@@ -379,7 +384,9 @@ void cuda_fused_4bit(Tensor& p, Tensor& g,
             correction1,
             correction2_sqrt,
             step_size,
-            weight_decay_update
+            weight_decay_update,
+            resid_beta1,
+            resid_beta2
 
         );
     }));
