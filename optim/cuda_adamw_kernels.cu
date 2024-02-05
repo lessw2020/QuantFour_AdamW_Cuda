@@ -20,8 +20,8 @@
 
 using torch::Tensor;
 
-static __device__ __const__ uint8_t _bitmask = 15;
-static __device__ __const__ uint8_t _right_pack_bitmask = _bitmask << 4;
+static __device__ __const__ const uint8_t _bitmask = 15;
+static __device__ __const__ const uint8_t _right_pack_bitmask = _bitmask << 4;
 
 static __device__ __const__ float _exp_qmap [] = {
                 -0.8875,
@@ -193,12 +193,21 @@ __device__ __forceinline__ float q_mapping( const float* __restrict__ qmap,
 
 }
 
+__device__ __forceinline__ void atomicMaxFloat(volatile float* addr, float value) {
+    if (!signbit(value)) {
+        atomicMax((int*)addr, __float_as_int(value));
+    } else {
+        atomicMin((unsigned int*)addr, __float_as_uint(value));
+    }
+}
+
 // atomic float max with correct negative handling
-__device__ __forceinline__ void atomicMaxFloat(float* addr, float value) {
+/*__device__ __forceinline__ void atomicMaxFloat(float* addr, float value) {
 
     !signbit(value) ? __int_as_float(atomicMax((int*)addr, __float_as_int(value))) :
         __uint_as_float(atomicMin((unsigned int*)addr, __float_as_uint(value)));
 }
+*/
 
 template <typename T>
 __global__ void cuda_fused_4bit_kernel(
