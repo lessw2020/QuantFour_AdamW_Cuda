@@ -10,7 +10,7 @@ from .quant_opt_base import create_dynamic_map, create_pow_map, create_qmap
 
 import triton
 import triton.language as tl
-from .q_binary_search import q_mapping_kernel
+# from .q_binary_search import q_mapping_kernel
 from quantfour_cuda import fused_single_tensor, fused_4bit
 
 __all__ = ["AdamW_Fused_QuantFour"]
@@ -417,10 +417,10 @@ class AdamWFused_QuantFour(torch.optim.Optimizer):
                             eps, t_step)
 
                     torch.cuda.synchronize(param.device)
-                    lprint(f"Back from 4bit! {exp_avg_scale=}, {exp_avg_sq_scale=}")
+                    lprint(f"Back from 4bit! {t_step=}, {exp_avg_scale=}, {exp_avg_sq_scale=}")
                     lprint(f"{param[0]=}")
-                    lprint(f"{q_exp_avg[0:10]=}, {q_exp_avg_sq[0:10]=}")
-                    assert False, 'end of step check'
+                    lprint(f"{q_exp_avg[0:5]=}, {q_exp_avg_sq[0:5]=}")
+                    # assert False, 'end of step check'
                     '''
                     lprint(f"back from cuda {beta1=}")
                     print(f"back from cuda {_momentum_qmap[0]=}")
