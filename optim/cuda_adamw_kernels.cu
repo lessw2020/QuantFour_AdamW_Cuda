@@ -177,6 +177,7 @@ __device__ __forceinline__ float q_mapping( const float* __restrict__ qmap,
     if (qmap[high] <=x) return high;
 
     #pragma unroll
+    // replace with for loop?
     while (low < high) {
         int mid = (low + high) >> 1;
         if (qmap[mid] <= x)
@@ -307,11 +308,11 @@ __global__ void cuda_fused_4bit_kernel(
     float local_absmax_sq = fmaxf((float)sq_left, (float)sq_right);
 
     // determine global max for this block
-    atomicMaxFloat(&absmax_exp, local_absmax_exp);
-    atomicMaxFloat(&absmax_sq, local_absmax_sq);
+    //atomicMaxFloat(&absmax_exp, local_absmax_exp);
+    //atomicMaxFloat(&absmax_sq, local_absmax_sq);
 
-    //__int_as_float(atomicMax((int *)&absmax_exp, __float_as_int(local_absmax_exp)));
-    //__int_as_float(atomicMax((int *)&absmax_sq, __float_as_int(local_absmax_sq)));
+    __int_as_float(atomicMax((int *)&absmax_exp, __float_as_int(local_absmax_exp)));
+    __int_as_float(atomicMax((int *)&absmax_sq, __float_as_int(local_absmax_sq)));
 
     __syncthreads();
 
