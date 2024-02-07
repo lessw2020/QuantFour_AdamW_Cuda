@@ -196,26 +196,6 @@ __device__ __forceinline__ float q_mapping( const float* __restrict__ qmap,
 
 }
 
-__device__ __forceinline__ void atomicMaxFloat(volatile float* addr, float value) {
-    if (!signbit(value)) {
-        atomicMax((int*)addr, __float_as_int(value));
-    } else {
-        atomicMin((unsigned int*)addr, __float_as_uint(value));
-    }
-}
-
-// only needed b/c __fmaxf must exist inside device only code...
-__device__ float asynchMaxFloat(volatile float* addr, float value) {
-    *addr = fmaxf(*addr, value);
-}
-
-// atomic float max with correct negative handling
-/*__device__ __forceinline__ void atomicMaxFloat(float* addr, float value) {
-
-    !signbit(value) ? __int_as_float(atomicMax((int*)addr, __float_as_int(value))) :
-        __uint_as_float(atomicMin((unsigned int*)addr, __float_as_uint(value)));
-}
-*/
 
 // sequential threads parallel reduction to determine max value for each block for exp and sq
 __device__ __forceinline__ void seq_threads_max_reducer(int thread_id, float local_absmax_val) {
@@ -343,7 +323,6 @@ __global__ void cuda_fused_4bit_kernel(
     }
 
 
-
     // determine global max for this block
     //atomicMaxFloat(&absmax_exp, local_absmax_exp);
     //atomicMaxFloat(&absmax_sq, local_absmax_sq);
@@ -374,10 +353,6 @@ __global__ void cuda_fused_4bit_kernel(
     exp[global_id] = local_packed_exp;
     sq[global_id] = local_packed_sq;
 
-    //if (thread_id == 0) {
-        //exp_qscale[block_id] = (T)absmax_exp;
-       //sq_qscale[block_id] = (T)absmax_sq;
-    //}
     __syncthreads();
 
 }
