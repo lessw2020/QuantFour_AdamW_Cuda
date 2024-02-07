@@ -420,7 +420,7 @@ class AdamWFused_QuantFour(torch.optim.Optimizer):
                     lprint(f"Back from 4bit! {t_step=}, {exp_avg_scale=}, {exp_avg_sq_scale=}")
                     lprint(f"{param[0]=}")
                     lprint(f"{q_exp_avg[0:5]=}, {q_exp_avg_sq[0:5]=}")
-                    # assert False, 'end of step check'
+                    assert False, 'end of step check'
                     '''
                     lprint(f"back from cuda {beta1=}")
                     print(f"back from cuda {_momentum_qmap[0]=}")

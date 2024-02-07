@@ -20,8 +20,10 @@
 
 using torch::Tensor;
 
-static __device__ __const__ const uint8_t _bitmask = 15;
-static __device__ __const__ const uint8_t _right_pack_bitmask = _bitmask << 4;
+static __device__ __const__ uint8_t _bitmask = 15;
+static __device__ __const__ uint8_t _right_pack_bitmask = _bitmask << 4;
+
+static __device__ __shared__ float _exp_reducer [32];
 
 static __device__ __const__ float _exp_qmap [] = {
                 -0.8875,
@@ -202,6 +204,11 @@ __device__ __forceinline__ void atomicMaxFloat(volatile float* addr, float value
     }
 }
 
+// only needed b/c __fmaxf must exist inside device only code...
+__device__ float asynchMaxFloat(volatile float* addr, float value) {
+    *addr = fmaxf(*addr, value);
+}
+
 // atomic float max with correct negative handling
 /*__device__ __forceinline__ void atomicMaxFloat(float* addr, float value) {
 
@@ -307,14 +314,51 @@ __global__ void cuda_fused_4bit_kernel(
     float local_absmax_exp = fmax(fabsf((float)exp_left), fabsf((float)exp_right));
     float local_absmax_sq = fmaxf((float)sq_left, (float)sq_right);
 
+    // --- sequential threads parallel reduction
+    // determine global absmax for exp
+    _exp_reducer[thread_id]=local_absmax_exp;
+    __syncthreads();
+
+    //start at half strides and divide by two each iter...
+    for (int s= 64; s > 0; s /=2) {
+        if (thread_id < s) {
+            _exp_reducer[thread_id] = max(_exp_reducer[thread_id], _exp_reducer[thread_id +s]);
+        }
+        __syncthreads();
+    }
+
+    if (thread_id ==0) {
+
+        exp_qscale[block_id] = _exp_reducer[0];
+    }
+
+    // determine global absmax for sq
+    _exp_reducer[thread_id]=local_absmax_sq;
+    __syncthreads();
+
+    //start at half strides and divide by two each iter...
+    for (int s= 64; s > 0; s /=2) {
+        if (thread_id < s) {
+            _exp_reducer[thread_id] = max(_exp_reducer[thread_id], _exp_reducer[thread_id +s]);
+        }
+        __syncthreads();
+    }
+
+    if (thread_id ==0) {
+
+        sq_qscale[block_id] = _exp_reducer[0];
+    }
+
+
+
     // determine global max for this block
     //atomicMaxFloat(&absmax_exp, local_absmax_exp);
     //atomicMaxFloat(&absmax_sq, local_absmax_sq);
 
-    __int_as_float(atomicMax((int *)&absmax_exp, __float_as_int(local_absmax_exp)));
-    __int_as_float(atomicMax((int *)&absmax_sq, __float_as_int(local_absmax_sq)));
+    //__int_as_float(atomicMax((int *)&absmax_exp, __float_as_int(local_absmax_exp)));
+    //__int_as_float(atomicMax((int *)&absmax_sq, __float_as_int(local_absmax_sq)));
 
-    __syncthreads();
+    //__syncthreads();
 
     int8_t local_packed_exp = 0;
     int8_t local_packed_sq = 0;
@@ -337,10 +381,10 @@ __global__ void cuda_fused_4bit_kernel(
     exp[global_id] = local_packed_exp;
     sq[global_id] = local_packed_sq;
 
-    if (thread_id == 0) {
-        exp_qscale[block_id] = (T)absmax_exp;
-        sq_qscale[block_id] = (T)absmax_sq;
-    }
+    //if (thread_id == 0) {
+        //exp_qscale[block_id] = (T)absmax_exp;
+       //sq_qscale[block_id] = (T)absmax_sq;
+    //}
     __syncthreads();
 
 }
