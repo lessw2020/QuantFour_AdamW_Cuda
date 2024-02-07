@@ -217,6 +217,19 @@ __device__ float asynchMaxFloat(volatile float* addr, float value) {
 }
 */
 
+// sequential threads parallel reduction to determine max value for each block for exp and sq
+__device__ __forceinline__ void seq_threads_max_reducer(int thread_id, float local_absmax_val) {
+        _exp_reducer[thread_id]=local_absmax_val;
+        __syncthreads();
+
+        for (int s= 64; s > 0; s /=2) {
+            if (thread_id < s) {
+                _exp_reducer[thread_id] = max(_exp_reducer[thread_id], _exp_reducer[thread_id +s]);
+            }
+            __syncthreads();
+    }
+}
+
 template <typename T>
 __global__ void cuda_fused_4bit_kernel(
     T* __restrict__ p,
@@ -311,39 +324,19 @@ __global__ void cuda_fused_4bit_kernel(
         }
 
     // prepare quantization info - update absmax scales
-    float local_absmax_exp = fmax(fabsf((float)exp_left), fabsf((float)exp_right));
-    float local_absmax_sq = fmaxf((float)sq_left, (float)sq_right);
+    float local_absmax_exp = max((float)exp_left, (float)exp_right);
+    float local_absmax_sq = max((float)sq_left, (float)sq_right);
 
     // --- sequential threads parallel reduction
     // determine global absmax for exp
-    _exp_reducer[thread_id]=local_absmax_exp;
-    __syncthreads();
-
-    //start at half strides and divide by two each iter...
-    for (int s= 64; s > 0; s /=2) {
-        if (thread_id < s) {
-            _exp_reducer[thread_id] = max(_exp_reducer[thread_id], _exp_reducer[thread_id +s]);
-        }
-        __syncthreads();
-    }
-
+    seq_threads_max_reducer(thread_id, local_absmax_exp);
     if (thread_id ==0) {
 
         exp_qscale[block_id] = _exp_reducer[0];
     }
 
-    // determine global absmax for sq
-    _exp_reducer[thread_id]=local_absmax_sq;
-    __syncthreads();
-
-    //start at half strides and divide by two each iter...
-    for (int s= 64; s > 0; s /=2) {
-        if (thread_id < s) {
-            _exp_reducer[thread_id] = max(_exp_reducer[thread_id], _exp_reducer[thread_id +s]);
-        }
-        __syncthreads();
-    }
-
+    // same for sq
+    seq_threads_max_reducer(thread_id, local_absmax_sq);
     if (thread_id ==0) {
 
         sq_qscale[block_id] = _exp_reducer[0];
