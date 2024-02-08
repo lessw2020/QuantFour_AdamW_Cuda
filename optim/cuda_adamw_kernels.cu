@@ -1,22 +1,19 @@
 // Copyright (c) Meta Platforms, Inc. and affiliates.
 // All rights reserved.
 
-// This is a productionized implementation of:
+// This is a productionized implementation of fused 4bit AdamW:
 // "Memory Efficient Optimizers with 4-bit States"
 // Bingrui Li, Jianfei Chen, Jun Zhu
 // https://arxiv.org/abs/2309.01507
 
+#include <torch/extension.h>
+
+#include <cuda.h>
+#include <cuda_runtime.h>
 #include <ATen/ATen.h>
 #include <ATen/cuda/detail/IndexUtils.cuh>
 #include <ATen/cuda/Exceptions.h>
 
-#include <torch/extension.h>
-#include <THC/THCAtomics.cuh>
-
-#include <cuda.h>
-#include <cuda_runtime.h>
-#include <cstdio>
-#include <cmath>
 
 using torch::Tensor;
 
@@ -234,7 +231,7 @@ __global__ void cuda_fused_4bit_kernel(
 
 )
 {
-    // establish thread, block and global situational awareness
+    // establish spatial awareness
     const int thread_id = threadIdx.x;
     const int block_id = blockIdx.x;
     const int global_id = blockIdx.x * blockDim.x + thread_id;
@@ -307,30 +304,18 @@ __global__ void cuda_fused_4bit_kernel(
     float local_absmax_exp = max((float)exp_left, (float)exp_right);
     float local_absmax_sq = max((float)sq_left, (float)sq_right);
 
-    // --- sequential threads parallel reduction
+    // --- sequential threads parallel reduction to
     // determine global absmax for exp
     seq_threads_max_reducer(thread_id, local_absmax_exp);
     if (thread_id ==0) {
-
         exp_qscale[block_id] = _exp_reducer[0];
     }
 
     // same for sq
     seq_threads_max_reducer(thread_id, local_absmax_sq);
     if (thread_id ==0) {
-
         sq_qscale[block_id] = _exp_reducer[0];
     }
-
-
-    // determine global max for this block
-    //atomicMaxFloat(&absmax_exp, local_absmax_exp);
-    //atomicMaxFloat(&absmax_sq, local_absmax_sq);
-
-    //__int_as_float(atomicMax((int *)&absmax_exp, __float_as_int(local_absmax_exp)));
-    //__int_as_float(atomicMax((int *)&absmax_sq, __float_as_int(local_absmax_sq)));
-
-    //__syncthreads();
 
     int8_t local_packed_exp = 0;
     int8_t local_packed_sq = 0;
