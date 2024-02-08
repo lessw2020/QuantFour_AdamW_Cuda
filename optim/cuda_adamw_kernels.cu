@@ -195,26 +195,41 @@ __device__ __forceinline__ float q_mapping( const float* __restrict__ qmap,
 
 
 // sequential threads parallel reduction to determine max value for each block for exp and sq
-__device__ __forceinline__ void seq_threads_max_reducer(int tid, float* local_absmax_val) {
+__device__ __forceinline__ void seq_threads_max_reducer(int tid, float* local_val) {
 
-        _exp_reducer[tid]= *local_absmax_val;
+        unsigned mask = 0xFFFFFFFFU;
+        int lane = tid % 32;
+        int warpId = tid / 32;
+        float val = *local_val;
+        int offset = 16;
+
+        for (offset = 16; offset > 0; offset >>=1) {
+            val = max(val, __shfl_down_sync(mask, val, offset));
+        }
+
+        if (lane==0) {
+            _exp_reducer[warpId] = val;
+        }
         __syncthreads();
 
-        // get to warp level lanes
-        if (tid < 32) {
-            _exp_reducer[tid] = max(_exp_reducer[tid], _exp_reducer[tid + 32]);
-        }
-        __syncwarp();
+        // warp 0 only
+        // final warp reduction
 
-        // then shuffle down warp synch
-        if (tid < 16){
-            #define Full_Mask 0xffffffff
-            float val = _exp_reducer[tid];
-            for (int offset = 16; offset > 0; offset /= 2)
-                val = max(val, __shfl_down_sync(Full_Mask, val, offset));
-            if (tid ==0) {
-                *local_absmax_val = val;
+        // careful - this assumes q block size of 128...expand to loop if larger
+        if (warpId ==0) {
+            if (tid < 2) {
+                // (tid < blockDim.x/warpSize)
+                val = _exp_reducer[lane];
+
             }
+
+            offset = 1;
+            val = max(val, __shfl_down_sync(mask, val, offset));
+
+            if (tid==0) {
+                *local_val = val;
+            }
+
         }
 
 }
