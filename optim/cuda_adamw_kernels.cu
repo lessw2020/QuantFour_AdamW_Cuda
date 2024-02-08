@@ -200,11 +200,11 @@ __device__ __forceinline__ void seq_threads_max_reducer(int tid, float* local_ab
         _exp_reducer[tid]= *local_absmax_val;
         __syncthreads();
 
-        // get to warp level memory
+        // get to warp level lanes
         if (tid < 32) {
             _exp_reducer[tid] = max(_exp_reducer[tid], _exp_reducer[tid + 32]);
         }
-        __syncthreads();
+        __syncwarp();
 
         // then shuffle down warp synch
         if (tid < 16){
