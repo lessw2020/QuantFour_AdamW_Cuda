@@ -20,7 +20,7 @@ using torch::Tensor;
 static __device__ __const__ uint8_t _bitmask = 15;
 static __device__ __const__ uint8_t _right_pack_bitmask = _bitmask << 4;
 
-static __device__ __shared__ float _exp_reducer [32];
+static __device__ __shared__ float _exp_reducer [64];
 
 static __device__ __const__ float _exp_qmap [] = {
                 -0.8875,
@@ -195,17 +195,58 @@ __device__ __forceinline__ float q_mapping( const float* __restrict__ qmap,
 
 
 // sequential threads parallel reduction to determine max value for each block for exp and sq
-__device__ __forceinline__ void seq_threads_max_reducer(int thread_id, float local_absmax_val) {
-        _exp_reducer[thread_id]=local_absmax_val;
+__device__ __forceinline__ void seq_threads_max_reducer(int tid, float* local_absmax_val) {
+
+        _exp_reducer[tid]= *local_absmax_val;
         __syncthreads();
 
-        for (int s= 64; s > 0; s /=2) {
-            if (thread_id < s) {
-                _exp_reducer[thread_id] = max(_exp_reducer[thread_id], _exp_reducer[thread_id +s]);
+        // get to warp level memory
+        if (tid < 32) {
+            _exp_reducer[tid] = max(_exp_reducer[tid], _exp_reducer[tid + 32]);
+        }
+        __syncthreads();
+
+        // then shuffle down warp synch
+        if (tid < 16){
+            #define Full_Mask 0xffffffff
+            float val = _exp_reducer[tid];
+            for (int offset = 16; offset > 0; offset /= 2)
+                val = max(val, __shfl_down_sync(Full_Mask, val, offset));
+            if (tid ==0) {
+                *local_absmax_val = val;
             }
-            __syncthreads();
-    }
+        }
+
 }
+
+/*
+scratchpad
+// warpReduction
+        /*if (tid < 32) {
+            _exp_reducer[tid] = max(_exp_reducer[tid], _exp_reducer[tid + 32]);
+            _exp_reducer[tid] = max(_exp_reducer[tid], _exp_reducer[tid + 16]);
+            _exp_reducer[tid] = max(_exp_reducer[tid], _exp_reducer[tid + 8]);
+            _exp_reducer[tid] = max(_exp_reducer[tid], _exp_reducer[tid + 4]);
+            _exp_reducer[tid] = max(_exp_reducer[tid], _exp_reducer[tid + 2]);
+            _exp_reducer[tid] = max(_exp_reducer[tid], _exp_reducer[tid + 1]);
+
+        }
+        */
+
+
+        // 0 32   0 16 0 8 0 4 0 2 0 1
+        // 1 33   1 17 1 9 1 5 1 3 1 2
+        // 31 63  31 47 31 39 31 35 31 33 31 32
+
+        /*for (int s= 32; s > 16; s /=2) {
+            if (tid < s) {
+                _exp_reducer[tid] = max(_exp_reducer[tid], _exp_reducer[tid +s]);
+            }
+            //__syncthreads();
+        }
+        */
+
+
 
 template <typename T>
 __global__ void cuda_fused_4bit_kernel(
@@ -306,15 +347,15 @@ __global__ void cuda_fused_4bit_kernel(
 
     // --- sequential threads parallel reduction to
     // determine global absmax for exp
-    seq_threads_max_reducer(thread_id, local_absmax_exp);
+    seq_threads_max_reducer(thread_id, &local_absmax_exp);
     if (thread_id ==0) {
-        exp_qscale[block_id] = _exp_reducer[0];
+        exp_qscale[block_id] = local_absmax_exp; //_exp_reducer[0];
     }
 
     // same for sq
-    seq_threads_max_reducer(thread_id, local_absmax_sq);
+    seq_threads_max_reducer(thread_id, &local_absmax_sq);
     if (thread_id ==0) {
-        sq_qscale[block_id] = _exp_reducer[0];
+        sq_qscale[block_id] = local_absmax_sq; //_exp_reducer[0];
     }
 
     int8_t local_packed_exp = 0;
