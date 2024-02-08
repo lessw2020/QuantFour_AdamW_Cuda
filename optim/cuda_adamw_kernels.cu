@@ -194,7 +194,7 @@ __device__ __forceinline__ float q_mapping( const float* __restrict__ qmap,
 }
 
 
-// sequential threads parallel reduction to determine max value for each block for exp and sq
+// multi-warp shuffle down synch parallel reduction to determine max value for each block for exp and sq
 __device__ __forceinline__ void seq_threads_max_reducer(int tid, float* local_val) {
 
         unsigned mask = 0xFFFFFFFFU;
