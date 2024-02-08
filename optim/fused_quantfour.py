@@ -6,7 +6,6 @@ import torch
 import torch.distributed as dist
 from torch import Tensor
 import sys
-from .quant_opt_base import create_dynamic_map, create_pow_map, create_qmap
 
 import triton
 import triton.language as tl
@@ -108,28 +107,6 @@ _variance_midpoint_lut = torch.tensor(
     )
 
 
-
-
-'''
-class FirstMoment(QuantParams):
-    bits = 4
-    group_size = 128
-    scale_type = "group"
-    quant_type = "nonlinear"
-    round_type = "real-nearest"
-    signed = True
-    threshold = 4096
-
-
-class SecondMoment(QuantParams):
-    bits = 4
-    group_size = 128
-    scale_type = "rank1"
-    quant_type = "power-1"
-    round_type = "real-nearest"
-    signed = False
-    threshold = 4096
-'''
 
 def enable_param_quantization(p, threshold) -> bool:
     """ only enable quantization if the parameter is large enough """
