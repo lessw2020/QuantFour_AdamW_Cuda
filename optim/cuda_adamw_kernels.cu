@@ -297,6 +297,7 @@ __global__ void cuda_fused_4bit_kernel(
 
     // fail fast
     if (left_id >= total_size) return;
+    bool has_right_side = right_id < total_size;
 
     __shared__ float absmax_exp;
     __shared__ float absmax_sq;
@@ -306,53 +307,72 @@ __global__ void cuda_fused_4bit_kernel(
         absmax_sq = 0;
     }
 
+    // ---- uncoalesced memory access -----
+
+    const int8_t exp_full = exp[global_id];
+    const int8_t sq_full = sq[global_id];
+
+    float2 p2;
+    float2 g2;
+
+    if (has_right_side) {
+        p2 = __ldg((float2*)&p[left_id]);
+        g2 = __ldg((float2*)&g[left_id]);
+
+    }
+    else {
+        p2.x = p[left_id];
+        g2.x = g[left_id];
+    }
+
     // left side processing -------------------------------------
-    const int8_t exp_left_index = (exp[global_id]) & _bitmask;
-    const int8_t sq_left_index = (sq[left_id]) & _bitmask;
+    const int8_t exp_left_index = exp_full & _bitmask;
+    const int8_t sq_left_index = sq_full & _bitmask;
 
     //decoupled weight decay
-    p[left_id] = p[left_id] * weight_decay_update;
+    //p[left_id] = p[left_id] * weight_decay_update;
+    p2.x = p2.x * weight_decay_update;
 
     // left exp and sq updates
-    float curr_grad = g[left_id];
+    //float curr_grad = g[left_id];
     float exp_avg_qscale = exp_qscale[block_id];
 
     T exp_left = _exp_qmap[exp_left_index] * exp_avg_qscale;
-    exp_left = beta1 * exp_left + resid_beta1 * curr_grad;
+    exp_left = beta1 * exp_left + resid_beta1 * g2.x;
 
     T sq_left = _sq_qmap[sq_left_index] * sq_qscale[block_id];
-    sq_left = beta2 * sq_left + resid_beta2 * (curr_grad * curr_grad);
+    sq_left = beta2 * sq_left + resid_beta2 * (g2.x * g2.x);
 
     //float denom = (sqrtf(sq_left) / correction2_sqrt + eps);
     //float update = (exp_left/denom);
     //float update = (exp_left/(sqrtf(sq_left) / correction2_sqrt + eps));
 
     // param update
-    p[left_id] = p[left_id] - (step_size * (exp_left/(sqrtf(sq_left) / correction2_sqrt + eps)));
+    p[left_id] = p2.x - (step_size * (exp_left/(sqrtf(sq_left) / correction2_sqrt + eps)));
 
     // right side processing -------------------------------
     T exp_right =0;
     T sq_right = 0;
 
     if (right_id < total_size) {
-        const int8_t exp_right_index = (exp[global_id] >> 4) & _bitmask;
-        const int8_t sq_right_index = (sq[global_id]>>4) & _bitmask;
-        curr_grad = g[right_id];
+        const int8_t exp_right_index = (exp_full >> 4) & _bitmask;
+        const int8_t sq_right_index = (sq_full >> 4) & _bitmask;
+        //curr_grad = g[right_id];
 
         //decoupled weight decay, right side
-        p[right_id] = p[right_id] * weight_decay_update;
+        p2.y = p2.y * weight_decay_update;
 
         exp_right = _exp_qmap[exp_right_index] * exp_avg_qscale;
-        exp_right = beta1 * exp_right + resid_beta1 * curr_grad;
+        exp_right = beta1 * exp_right + resid_beta1 * g2.y;
 
         sq_right = _sq_qmap[sq_right_index] * sq_qscale[block_id];
-        sq_right = beta2 * sq_right + resid_beta2 * (curr_grad * curr_grad);
+        sq_right = beta2 * sq_right + resid_beta2 * (g2.y * g2.y);
 
         //denom = (sqrtf(sq_right) / correction2_sqrt + eps);
         //update = (exp_right/denom);
 
         // param update
-        p[right_id] = p[right_id] - (step_size * (exp_right/(sqrtf(sq_right) / correction2_sqrt + eps)));
+        p[right_id] = p2.y - (step_size * (exp_right/(sqrtf(sq_right) / correction2_sqrt + eps)));
 
         }
 
